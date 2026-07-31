@@ -183,7 +183,12 @@ dependencies = [
 name = "schomburg-cli"
 version = "0.0.0"
 dependencies = [
+ "git2",
+ "schomburg-connector",
+ "schomburg-connector-git",
  "schomburg-core",
+ "schomburg-engine",
+ "schomburg-store",
 ]
 
 [[package]]

@@ -6,3 +6,10 @@ publish = false
 
 [dependencies]
 schomburg-core = { path = "../schomburg-core" }
+schomburg-connector = { path = "../schomburg-connector" }
+schomburg-connector-git = { path = "../schomburg-connector-git" }
+schomburg-engine = { path = "../schomburg-engine" }
+schomburg-store = { path = "../schomburg-store" }
+
+[dev-dependencies]
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }

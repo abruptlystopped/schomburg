@@ -5,3 +5,6 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Explicit local Schomburg proof databases
+/.schomburg/

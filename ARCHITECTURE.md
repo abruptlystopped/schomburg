@@ -24,11 +24,15 @@ stable Rust toolchain for development.
 | `schomburg-connector-git` | Historical local Git commit import | `schomburg-core`, `schomburg-connector`, bundled libgit2 |
 | `schomburg-engine` | Connector lifecycle, validation, and event acceptance | `schomburg-connector`, `schomburg-core`, `schomburg-store` |
 | `schomburg-store` | Local SQLite persistence for core records | `schomburg-core`, SQLite, JSON serialization |
-| `schomburg-cli` | Future command-line entry point | `schomburg-core` only, at this stage |
+| `schomburg-cli` | Explicit-path local proof commands | Core, connector, Git connector, engine, and store crates |
 
 No MSRV is declared. Development uses the current stable Rust toolchain. An
 explicit MSRV policy must be selected before the first public package release;
 until then, the project does not claim compatibility with older Rust versions.
+
+The CLI requires explicit database and repository paths for the local proof.
+Only `init` creates the specified database parent directory. It does not choose
+or write to a global user data directory.
 
 ## Domain model boundary
 

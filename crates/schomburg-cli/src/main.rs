@@ -1,5 +1,10 @@
-//! Future command-line entry point for Schomburg.
-
 fn main() {
-    // Command behavior is intentionally not implemented in Phase 1.
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    match schomburg_cli::execute(&arguments) {
+        Ok(output) => print!("{output}"),
+        Err(error) => {
+            eprintln!("error: {error}");
+            std::process::exit(1);
+        }
+    }
 }
