@@ -4,7 +4,7 @@
 //! produce immutable events through an [`EventSink`]; the engine owns validation
 //! and persistence.
 
-use schomburg_core::{ConnectorId, Event};
+use schomburg_core::{ConnectorId, Event, EventId};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -137,6 +137,8 @@ pub enum EventAcceptanceError {
         /// The connector identifier recorded in the event provenance.
         actual: ConnectorId,
     },
+    /// An event with this stable identifier was already preserved.
+    DuplicateEventId(EventId),
     /// Append-only persistence rejected the event.
     Persistence { message: String },
 }
@@ -168,6 +170,7 @@ impl fmt::Display for EventAcceptanceError {
                 actual.as_str(),
                 expected.as_str()
             ),
+            Self::DuplicateEventId(id) => write!(formatter, "duplicate event ID: {}", id.as_str()),
             Self::Persistence { message } => write!(formatter, "persistence failed: {message}"),
         }
     }

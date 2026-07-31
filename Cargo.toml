@@ -3,6 +3,7 @@ members = [
     "crates/schomburg-core",
     "crates/schomburg-cli",
     "crates/schomburg-connector",
+    "crates/schomburg-connector-git",
     "crates/schomburg-engine",
     "crates/schomburg-store",
 ]

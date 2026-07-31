@@ -75,7 +75,8 @@ and source-specific lifecycle policy are deferred.
 
 ### Neutral / follow-up
 
-- No production connectors are included by this ADR.
+- The first production connector is the historical Git importer specified by
+  ADR 0005.
 - Connector configuration, scheduling, cancellation, retries, concurrency,
   capability semantics, and event-level validation beyond connector provenance
   remain undecided.

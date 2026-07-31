@@ -21,6 +21,7 @@ stable Rust toolchain for development.
 | --- | --- | --- |
 | `schomburg-core` | Domain model for preserved evidence | Rust standard library only |
 | `schomburg-connector` | Storage-independent connector contracts | `schomburg-core` only |
+| `schomburg-connector-git` | Historical local Git commit import | `schomburg-core`, `schomburg-connector`, bundled libgit2 |
 | `schomburg-engine` | Connector lifecycle, validation, and event acceptance | `schomburg-connector`, `schomburg-core`, `schomburg-store` |
 | `schomburg-store` | Local SQLite persistence for core records | `schomburg-core`, SQLite, JSON serialization |
 | `schomburg-cli` | Future command-line entry point | `schomburg-core` only, at this stage |
@@ -107,9 +108,32 @@ to the engine for one collection lifecycle:
 
 Connectors never receive the store or write to it directly. The sink exposes
 only event acceptance errors; SQLite-specific errors remain inside the store.
-No connector implementation, source-specific capability, current-state logic,
-or interpretation is defined by this architecture. See
+No connector assigns organizational metadata, derives current state, or
+interprets collected evidence. See
 [ADR 0004](docs/adr/0004-connector-contract-and-engine-boundary.md).
+
+## Git historical import
+
+`schomburg-connector-git` is the first production connector. It imports only
+commits reachable from the repository's current `HEAD`, in oldest-first
+topological order. It does not monitor repositories, track files or diffs, or
+represent branches as evidence.
+
+One Git commit becomes one `git.commit` event. Its source payload contains the
+exact raw Git commit object bytes, which preserve commit hash, parent hashes,
+author and committer identities/timestamps, and complete commit message without
+interpretation. `occurred_at` uses the Git committer timestamp; author time and
+the committer's timezone remain in the raw payload. `captured_at` is set when
+Schomburg imports the commit.
+
+Repository identity is the canonical local Git-directory path represented as
+native path bytes encoded in hexadecimal. Event IDs derive from connector
+namespace, repository identity, and commit hash. Reimporting a repository is
+therefore deduplicated by the append-only store; identical commit hashes in
+different repository identities remain distinct. Moving a repository changes
+its identity and produces different event IDs. Rewritten commits no longer
+reachable from `HEAD` are not newly imported, while previously captured events
+remain preserved. See [ADR 0005](docs/adr/0005-git-historical-commit-import.md).
 
 ## Decision process
 
@@ -118,4 +142,5 @@ in [`docs/adr/`](docs/adr/README.md). The foundational decisions above are
 recorded in [ADR 0001](docs/adr/0001-event-as-evidence-record.md) and
 [ADR 0002](docs/adr/0002-append-only-organizational-metadata.md), and
 [ADR 0003](docs/adr/0003-sqlite-append-only-persistence.md), and
-[ADR 0004](docs/adr/0004-connector-contract-and-engine-boundary.md).
+[ADR 0004](docs/adr/0004-connector-contract-and-engine-boundary.md), and
+[ADR 0005](docs/adr/0005-git-historical-commit-import.md).

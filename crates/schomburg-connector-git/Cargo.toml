@@ -1,0 +1,10 @@
+[package]
+name = "schomburg-connector-git"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+schomburg-connector = { path = "../schomburg-connector" }
+schomburg-core = { path = "../schomburg-core" }

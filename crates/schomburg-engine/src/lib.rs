@@ -8,7 +8,7 @@ use schomburg_connector::{
     EventSink, RegistrationError,
 };
 use schomburg_core::{ConnectorId, Event};
-use schomburg_store::Store;
+use schomburg_store::{Store, StoreError};
 use std::fmt;
 
 /// Coordinates registered connectors with append-only event persistence.
@@ -118,8 +118,11 @@ impl EventSink for EngineEventSink<'_> {
         }
         self.store
             .append_event(&event)
-            .map_err(|error| EventAcceptanceError::Persistence {
-                message: error.to_string(),
+            .map_err(|error| match error {
+                StoreError::DuplicateEventId(id) => EventAcceptanceError::DuplicateEventId(id),
+                error => EventAcceptanceError::Persistence {
+                    message: error.to_string(),
+                },
             })?;
         self.accepted_events += 1;
         Ok(())
@@ -130,11 +133,23 @@ impl EventSink for EngineEventSink<'_> {
 mod tests {
     use super::*;
     use schomburg_connector::{ConnectorCapabilities, ConnectorCapability};
+    use schomburg_connector_git::GitConnector;
     use schomburg_core::{
         CaptureTimestamp, EventId, EventKind, EventPayload, EventTimestamp, SchemaVersion, Source,
         SourceReference,
     };
-    use std::{collections::BTreeMap, sync::Arc, time::UNIX_EPOCH};
+    use std::{
+        collections::BTreeMap,
+        fs,
+        path::PathBuf,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::UNIX_EPOCH,
+    };
+
+    static GIT_REPOSITORY_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     struct TestConnector {
         descriptor: ConnectorDescriptor,
@@ -179,6 +194,46 @@ mod tests {
             CaptureTimestamp::new(UNIX_EPOCH),
             SchemaVersion::new("1"),
         )
+    }
+
+    struct TemporaryGitRepository {
+        path: PathBuf,
+        repository: git2::Repository,
+    }
+
+    impl TemporaryGitRepository {
+        fn new() -> Self {
+            let serial = GIT_REPOSITORY_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "schomburg-engine-git-import-test-{}-{serial}",
+                std::process::id()
+            ));
+            let _ = fs::remove_dir_all(&path);
+            let repository =
+                git2::Repository::init(&path).expect("initialize temporary repository");
+            Self { path, repository }
+        }
+    }
+
+    impl Drop for TemporaryGitRepository {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn git_commit(repository: &git2::Repository, message: &str) -> git2::Oid {
+        let tree_id = repository
+            .treebuilder(None)
+            .expect("create tree builder")
+            .write()
+            .expect("write empty tree");
+        let tree = repository.find_tree(tree_id).expect("find tree");
+        let signature =
+            git2::Signature::new("Author", "author@example.com", &git2::Time::new(100, 0))
+                .expect("signature");
+        repository
+            .commit(Some("HEAD"), &signature, &signature, message, &tree, &[])
+            .expect("create commit")
     }
 
     #[test]
@@ -231,5 +286,46 @@ mod tests {
             ))) if expected.as_str() == "fixture" && actual.as_str() == "other-connector"
         ));
         assert!(engine.store.list_events().expect("list events").is_empty());
+    }
+
+    #[test]
+    fn git_connector_reimport_is_deduplicated_through_engine_and_sqlite() {
+        let repository = TemporaryGitRepository::new();
+        let commit_id = git_commit(&repository.repository, "subject\n\nmessage café\n");
+        let store = Store::open_in_memory().expect("store");
+        let mut engine = Engine::new(store);
+        let mut first_import = GitConnector::open(&repository.path).expect("open first connector");
+        engine
+            .register(first_import.descriptor().clone())
+            .expect("register connector");
+
+        let first_report = engine.collect(&mut first_import).expect("first collection");
+        assert_eq!(first_report.accepted_events(), 1);
+        assert_eq!(
+            first_import.last_report().expect("first report").imported(),
+            1
+        );
+
+        let mut second_import =
+            GitConnector::open(&repository.path).expect("open second connector");
+        let second_report = engine
+            .collect(&mut second_import)
+            .expect("second collection");
+        assert_eq!(second_report.accepted_events(), 0);
+        assert_eq!(
+            second_import
+                .last_report()
+                .expect("second report")
+                .duplicates(),
+            1
+        );
+
+        let events = engine.store.list_events().expect("list events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].source().reference().as_str(),
+            commit_id.to_string()
+        );
+        assert!(String::from_utf8_lossy(events[0].payload().bytes()).contains("message café"));
     }
 }
