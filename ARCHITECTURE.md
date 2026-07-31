@@ -20,6 +20,8 @@ stable Rust toolchain for development.
 | Crate | Responsibility | Allowed dependencies |
 | --- | --- | --- |
 | `schomburg-core` | Domain model for preserved evidence | Rust standard library only |
+| `schomburg-connector` | Storage-independent connector contracts | `schomburg-core` only |
+| `schomburg-engine` | Connector lifecycle, validation, and event acceptance | `schomburg-connector`, `schomburg-core`, `schomburg-store` |
 | `schomburg-store` | Local SQLite persistence for core records | `schomburg-core`, SQLite, JSON serialization |
 | `schomburg-cli` | Future command-line entry point | `schomburg-core` only, at this stage |
 
@@ -86,10 +88,28 @@ and serialization formats are intentionally not decided here.
 
 ## Connector boundary
 
-Connectors are outside `schomburg-core`. A connector will translate an external
-system's record into an `Event` using a stable `ConnectorId` and source
-reference. Adding a connector must therefore not require changes to the core
-crate's domain types.
+Connectors are outside `schomburg-core` and implement the storage-independent
+`schomburg-connector` contract. A connector translates external records into
+immutable `Event` values using a stable `ConnectorId` and source reference.
+Adding a connector must not require changes to core domain types or introduce a
+SQLite dependency.
+
+Each connector has an immutable descriptor: its ID and an ordered set of opaque
+capability identifiers. The engine registers descriptors but does not own or
+construct connector instances. The host owns a connector instance and gives it
+to the engine for one collection lifecycle:
+
+1. Register the connector descriptor.
+2. Invoke the engine with the host-owned connector.
+3. The connector emits events to an engine-owned sink.
+4. The engine verifies that every event's provenance ID matches the registered
+   running connector and appends it through `schomburg-store`.
+
+Connectors never receive the store or write to it directly. The sink exposes
+only event acceptance errors; SQLite-specific errors remain inside the store.
+No connector implementation, source-specific capability, current-state logic,
+or interpretation is defined by this architecture. See
+[ADR 0004](docs/adr/0004-connector-contract-and-engine-boundary.md).
 
 ## Decision process
 
@@ -97,4 +117,5 @@ Capture durable, consequential choices as Architecture Decision Records (ADRs)
 in [`docs/adr/`](docs/adr/README.md). The foundational decisions above are
 recorded in [ADR 0001](docs/adr/0001-event-as-evidence-record.md) and
 [ADR 0002](docs/adr/0002-append-only-organizational-metadata.md), and
-[ADR 0003](docs/adr/0003-sqlite-append-only-persistence.md).
+[ADR 0003](docs/adr/0003-sqlite-append-only-persistence.md), and
+[ADR 0004](docs/adr/0004-connector-contract-and-engine-boundary.md).

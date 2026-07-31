@@ -104,8 +104,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "schomburg-connector"
+version = "0.0.0"
+dependencies = [
+ "schomburg-core",
+]
+
+[[package]]
 name = "schomburg-core"
 version = "0.0.0"
+
+[[package]]
+name = "schomburg-engine"
+version = "0.0.0"
+dependencies = [
+ "schomburg-connector",
+ "schomburg-core",
+ "schomburg-store",
+]
 
 [[package]]
 name = "schomburg-store"

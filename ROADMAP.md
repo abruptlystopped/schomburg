@@ -12,6 +12,7 @@ This is a planning scaffold, not a commitment or schedule.
 - [x] Separate immutable observed evidence from append-only organizational
   metadata history.
 - [x] Add append-only local SQLite persistence for events and annotations.
+- [x] Define storage-independent connector and engine contracts.
 - [x] Record the foundation decisions as an ADR.
 - [ ] Select an MSRV policy before the first public package release.
 
