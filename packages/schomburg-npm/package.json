@@ -1,0 +1,15 @@
+{
+  "name": "schomburg",
+  "version": "0.0.1",
+  "description": "Local-first evidence engine pre-alpha scaffolding",
+  "bin": {
+    "schomburg": "bin/schomburg.js"
+  },
+  "files": [
+    "bin/schomburg.js",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
