@@ -1,0 +1,8 @@
+[package]
+name = "schomburg-cli"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+schomburg-core = { path = "../schomburg-core" }
