@@ -11,6 +11,7 @@ This is a planning scaffold, not a commitment or schedule.
 - [x] Define the immutable event domain model and connector boundary.
 - [x] Separate immutable observed evidence from append-only organizational
   metadata history.
+- [x] Add append-only local SQLite persistence for events and annotations.
 - [x] Record the foundation decisions as an ADR.
 - [ ] Select an MSRV policy before the first public package release.
 

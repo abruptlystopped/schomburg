@@ -2,6 +2,7 @@
 members = [
     "crates/schomburg-core",
     "crates/schomburg-cli",
+    "crates/schomburg-store",
 ]
 resolver = "3"
 

@@ -20,6 +20,7 @@ stable Rust toolchain for development.
 | Crate | Responsibility | Allowed dependencies |
 | --- | --- | --- |
 | `schomburg-core` | Domain model for preserved evidence | Rust standard library only |
+| `schomburg-store` | Local SQLite persistence for core records | `schomburg-core`, SQLite, JSON serialization |
 | `schomburg-cli` | Future command-line entry point | `schomburg-core` only, at this stage |
 
 No MSRV is declared. Development uses the current stable Rust toolchain. An
@@ -59,6 +60,26 @@ Confidence is intentionally not modeled until the project defines a numeric
 scale and its validation rules. The core must not preserve incompatible labels
 or source-specific number formats as if they were comparable confidence.
 
+## Local persistence boundary
+
+`schomburg-store` persists `Event` and `Annotation` records in an embedded
+SQLite database. It exposes append, get, and list operations only: observed
+records and organizational history cannot be updated or deleted through its
+normal API.
+
+The store has no interpretation or current-state logic. It preserves event
+payload bytes as BLOB data, serializes string metadata as a JSON object, and
+stores annotation value kind separately from its text so `ContextId` remains
+distinct from an opaque value. Timestamps use a fixed-width sortable binary
+encoding, allowing exact `SystemTime` reconstruction and deterministic
+chronological ordering.
+
+The store enforces that every annotation targets an existing event and that a
+supersedes reference names an existing annotation for the same event and the
+same organizational field. An annotation cannot supersede itself. These checks
+preserve append-only history without selecting which assignment is current. See
+[ADR 0003](docs/adr/0003-sqlite-append-only-persistence.md).
+
 The core model retains source-specific data without interpreting it. It uses
 opaque, strongly typed identifiers and labels; their generation, validation,
 and serialization formats are intentionally not decided here.
@@ -75,4 +96,5 @@ crate's domain types.
 Capture durable, consequential choices as Architecture Decision Records (ADRs)
 in [`docs/adr/`](docs/adr/README.md). The foundational decisions above are
 recorded in [ADR 0001](docs/adr/0001-event-as-evidence-record.md) and
-[ADR 0002](docs/adr/0002-append-only-organizational-metadata.md).
+[ADR 0002](docs/adr/0002-append-only-organizational-metadata.md), and
+[ADR 0003](docs/adr/0003-sqlite-append-only-persistence.md).
