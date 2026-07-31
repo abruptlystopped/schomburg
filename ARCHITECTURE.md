@@ -32,11 +32,32 @@ An `Event` is the immutable record of one observed fact from one source at one
 point in time. It is the core evidence record; there is no separate `Evidence`
 container or grouping model.
 
-Each event holds a stable identifier, occurred and capture timestamps, source
-provenance, event kind, an optional context reference, source-specific payload,
-and a schema version. Grouping, filtering, and presentation are views over
-events and must not change an underlying event. Corrections and classifications
-are separate future concepts and must not rewrite observed evidence.
+Each event holds only factual capture data: a stable identifier, occurred and
+capture timestamps, source provenance (including its connector identifier),
+event kind, source-specific payload, and schema version. Source-provided hints
+may be retained in that payload but do not become current organizational state.
+
+## Organizational metadata boundary
+
+Organizational metadata is stored separately as immutable, append-only
+`Annotation` records. An annotation targets an event and retains its field,
+value, assignment source, timestamp, optional superseded annotation, and schema
+version.
+
+Annotations may represent context, lenses, categories, tags, visibility, or
+other organizational data. Context values use a typed `ContextId` reserved for
+the future first-class context model; other values remain opaque. The core does
+not interpret them. An event contains no authoritative current context or other
+editable organizational state.
+
+A later annotation may supersede an earlier one without changing that earlier
+record. Presentation will eventually select the latest valid assignment from
+history; the selection rule and persistence are deliberately not implemented in
+this phase.
+
+Confidence is intentionally not modeled until the project defines a numeric
+scale and its validation rules. The core must not preserve incompatible labels
+or source-specific number formats as if they were comparable confidence.
 
 The core model retains source-specific data without interpreting it. It uses
 opaque, strongly typed identifiers and labels; their generation, validation,
@@ -53,4 +74,5 @@ crate's domain types.
 
 Capture durable, consequential choices as Architecture Decision Records (ADRs)
 in [`docs/adr/`](docs/adr/README.md). The foundational decisions above are
-recorded in [ADR 0001](docs/adr/0001-event-as-evidence-record.md).
+recorded in [ADR 0001](docs/adr/0001-event-as-evidence-record.md) and
+[ADR 0002](docs/adr/0002-append-only-organizational-metadata.md).

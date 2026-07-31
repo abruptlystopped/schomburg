@@ -26,8 +26,9 @@ grouping, storage, or connector implementations.
 ## Decision outcome
 
 Chosen option: **Use `Event` as the immutable record of one observed fact**.
-An event carries its own provenance, timing, kind, optional context reference,
-payload, and schema version. No separate evidence container is introduced.
+An event carries only capture facts: provenance, timing, kind, payload, and
+schema version. No separate evidence container is introduced. Organizational
+metadata is explicitly outside the event and is governed by ADR 0002.
 
 ## Consequences
 
@@ -39,7 +40,8 @@ payload, and schema version. No separate evidence container is introduced.
 
 ### Negative
 
-- Relationships, corrections, and classifications require later domain models.
+- Relationships, corrections, and classifications require separate domain
+  models.
 - The generic payload intentionally does not provide source-specific semantics.
 
 ### Neutral / follow-up

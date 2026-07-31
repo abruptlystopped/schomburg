@@ -6,6 +6,8 @@
 pub mod model;
 
 pub use model::{
-    CaptureTimestamp, ConnectorId, ContextId, Event, EventId, EventKind, EventPayload,
-    EventTimestamp, MediaType, MetadataKey, MetadataValue, SchemaVersion, Source, SourceReference,
+    Annotation, AnnotationField, AnnotationId, AnnotationTimestamp, AnnotationValue,
+    AssignmentSource, CaptureTimestamp, ConnectorId, ContextId, Event, EventId, EventKind,
+    EventPayload, EventTimestamp, MediaType, MetadataKey, MetadataValue, SchemaVersion, Source,
+    SourceReference,
 };

@@ -9,6 +9,8 @@ This is a planning scaffold, not a commitment or schedule.
 - [x] Define the engine boundary: collect, preserve, and present evidence only.
 - [x] Define the initial workspace members and their dependency direction.
 - [x] Define the immutable event domain model and connector boundary.
+- [x] Separate immutable observed evidence from append-only organizational
+  metadata history.
 - [x] Record the foundation decisions as an ADR.
 - [ ] Select an MSRV policy before the first public package release.
 
@@ -17,6 +19,10 @@ This is a planning scaffold, not a commitment or schedule.
 - [ ] Define the first evidence-collection workflow without expanding the
   engine's responsibility.
 - [ ] Define preservation and presentation requirements for that workflow.
+- [ ] Define how presentation selects the latest valid organizational
+  assignment while retaining history.
+- [ ] Define a numeric confidence scale and validation policy before adding
+  confidence to annotations.
 - [ ] Establish acceptance criteria before implementing it.
 
 ## Open planning questions
