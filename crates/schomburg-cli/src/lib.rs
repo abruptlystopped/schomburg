@@ -47,8 +47,53 @@ pub fn execute(arguments: &[String]) -> Result<String, CliError> {
         Some("schedule") => schedule_command(&arguments[1..]),
         Some("monitoring") => monitoring_command(&arguments[1..]),
         Some("reconcile") => reconcile_status_command(&arguments[1..]),
+        Some("update-record") => update_record_command(&arguments[1..]),
         _ => Err(CliError::Usage(usage().to_owned())),
     }
+}
+fn update_record_command(arguments: &[String]) -> Result<String, CliError> {
+    let mut force = false;
+    let mut values = Vec::new();
+    for argument in arguments {
+        if argument == "--force" {
+            if force {
+                return Err(CliError::Usage(usage().to_owned()));
+            }
+            force = true
+        } else {
+            values.push(argument.clone())
+        }
+    }
+    let options = parse_options(&values, &["db"])?;
+    let store = Store::open(required_option(&options, "db")?).map_err(CliError::Store)?;
+    let result = agent(&store)
+        .update_record_once(
+            &Presenter::new({
+                let mut registry = PresentationRegistry::default();
+                registry
+                    .register(Box::new(GitPresenter::new()))
+                    .map_err(CliError::Presentation)?;
+                registry
+            }),
+            force,
+        )
+        .map_err(CliError::Agent)?;
+    let state = store
+        .reconciliation_configuration()
+        .map_err(CliError::Store)?
+        .state;
+    Ok(format!(
+        "imported: {}\nduplicates: {}\nrejected: {}\nfailed: {}\naffected dates: {}\nfiles created: {}\nfiles updated: {}\nfiles unchanged: {}\nfinal reconciliation status: {:?}\n",
+        result.imported,
+        0,
+        0,
+        result.failed,
+        result.dates_generated,
+        result.files_created,
+        result.files_updated,
+        result.files_unchanged,
+        state
+    ))
 }
 fn record_folder_command(arguments: &[String]) -> Result<String, CliError> {
     if arguments.first().map(String::as_str) != Some("set") {
@@ -838,5 +883,43 @@ mod tests {
             ]),
             Err(CliError::InvalidEventId(id)) if id.is_empty()
         ));
+    }
+
+    #[test]
+    fn update_record_cli_reports_structured_counts_and_errors() {
+        let directory = TemporaryDirectory::new("update-record");
+        let database = directory.path.join("db.sqlite3");
+        let folder = directory.path.join("records");
+        let db = database.to_str().expect("db");
+        let folder = folder.to_str().expect("folder");
+        execute(&arguments(&["init", "--db", db])).expect("init");
+        assert!(matches!(
+            execute(&arguments(&["update-record", "--db", db])),
+            Err(CliError::Agent(schomburg_agent::AgentError::NoRecordFolder))
+        ));
+        execute(&arguments(&[
+            "record-folder",
+            "set",
+            "--folder",
+            folder,
+            "--db",
+            db,
+        ]))
+        .expect("folder");
+        let output =
+            execute(&arguments(&["update-record", "--force", "--db", db])).expect("success");
+        for line in [
+            "imported: 0",
+            "duplicates: 0",
+            "rejected: 0",
+            "failed: 0",
+            "affected dates: 0",
+            "files created: 0",
+            "files updated: 0",
+            "files unchanged: 0",
+            "final reconciliation status: Succeeded",
+        ] {
+            assert!(output.contains(line), "missing {line}");
+        }
     }
 }

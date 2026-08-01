@@ -2,6 +2,7 @@
 
 use schomburg_connector::{ConnectorExtension, DiscoveredSourceCandidate};
 use schomburg_engine::Engine;
+use schomburg_presenter::{Presenter, record_date_for};
 use schomburg_store::{
     ConnectionId, ConnectionStatus, DiscoveredSource, DiscoveredSourceId, Store, StoreError,
 };
@@ -9,7 +10,12 @@ use schomburg_store::{
     GlobalMonitoringState, LocalReconciliationTime, ReconciliationConfiguration,
     ReconciliationSchedule,
 };
-use std::{collections::BTreeMap, fmt, path::PathBuf, time::SystemTime};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    path::PathBuf,
+    time::SystemTime,
+};
 use time::{OffsetDateTime, UtcOffset, Weekday};
 
 /// Calculates the next local eligible schedule occurrence after `now`.
@@ -205,6 +211,102 @@ impl<'a> Agent<'a> {
         }
         Ok(report)
     }
+
+    /// Runs one manual Update Record operation without changing monitoring state.
+    pub fn update_record_once(
+        &self,
+        presenter: &Presenter,
+        force: bool,
+    ) -> Result<UpdateRecordResult, AgentError> {
+        let mut config = self
+            .store
+            .reconciliation_configuration()
+            .map_err(AgentError::Store)?;
+        if config.record_folder.is_none() {
+            return Err(AgentError::NoRecordFolder);
+        }
+        if config.monitoring == GlobalMonitoringState::Paused && !force {
+            return Err(AgentError::MonitoringPaused);
+        }
+        config.last_attempt = Some(SystemTime::now());
+        config.state = schomburg_store::ReconciliationState::Running;
+        config.last_error = None;
+        self.store
+            .save_reconciliation_configuration(&config)
+            .map_err(AgentError::Store)?;
+        let before: BTreeSet<String> = self
+            .store
+            .list_events()
+            .map_err(AgentError::Store)?
+            .into_iter()
+            .map(|e| e.id().as_str().to_owned())
+            .collect();
+        let collection = match self.collect_once() {
+            Ok(value) => value,
+            Err(error) => {
+                config.state = schomburg_store::ReconciliationState::Failed;
+                config.last_error = Some(error.to_string());
+                self.store
+                    .save_reconciliation_configuration(&config)
+                    .map_err(AgentError::Store)?;
+                return Err(error);
+            }
+        };
+        let folder = config.record_folder.clone().expect("configured");
+        let mut result = UpdateRecordResult {
+            imported: collection.imported,
+            failed: collection.failed,
+            ..UpdateRecordResult::default()
+        };
+        for event in self.store.list_events().map_err(AgentError::Store)? {
+            if !before.contains(event.id().as_str()) {
+                let date = match record_date_for(event.occurred_at().as_system_time()) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let error = AgentError::Presenter(error.to_string());
+                        config.state = schomburg_store::ReconciliationState::Failed;
+                        config.last_error = Some(error.to_string());
+                        self.store
+                            .save_reconciliation_configuration(&config)
+                            .map_err(AgentError::Store)?;
+                        return Err(error);
+                    }
+                };
+                let generated = match presenter.generate_date(
+                    self.store,
+                    std::path::Path::new(&folder),
+                    date,
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let error = AgentError::Presenter(error.to_string());
+                        config.state = schomburg_store::ReconciliationState::Failed;
+                        config.last_error = Some(error.to_string());
+                        self.store
+                            .save_reconciliation_configuration(&config)
+                            .map_err(AgentError::Store)?;
+                        return Err(error);
+                    }
+                };
+                result.dates_generated += generated.dates_generated;
+                result.files_created += generated.files_created;
+                result.files_updated += generated.files_updated;
+                result.files_unchanged += generated.files_unchanged;
+            }
+        }
+        config.last_success = Some(SystemTime::now());
+        config.state = schomburg_store::ReconciliationState::Succeeded;
+        config.counts = schomburg_store::ReconciliationCounts {
+            imported: result.imported as u64,
+            duplicates: 0,
+            rejected: 0,
+            failed: result.failed as u64,
+        };
+        self.store
+            .save_reconciliation_configuration(&config)
+            .map_err(AgentError::Store)?;
+        Ok(result)
+    }
 }
 fn to_source(c: DiscoveredSourceCandidate, now: SystemTime) -> DiscoveredSource {
     DiscoveredSource {
@@ -236,6 +338,15 @@ pub struct CollectionCycleReport {
     pub failed: usize,
     pub skipped: usize,
 }
+#[derive(Default, Debug, Eq, PartialEq)]
+pub struct UpdateRecordResult {
+    pub imported: usize,
+    pub failed: usize,
+    pub dates_generated: usize,
+    pub files_created: usize,
+    pub files_updated: usize,
+    pub files_unchanged: usize,
+}
 #[derive(Debug)]
 pub enum AgentError {
     Store(StoreError),
@@ -243,6 +354,9 @@ pub enum AgentError {
     InvalidLocalTime,
     InvalidWeekdays,
     Schedule(String),
+    NoRecordFolder,
+    MonitoringPaused,
+    Presenter(String),
 }
 impl fmt::Display for AgentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -252,6 +366,9 @@ impl fmt::Display for AgentError {
             Self::InvalidLocalTime => write!(f, "invalid local reconciliation time"),
             Self::InvalidWeekdays => write!(f, "invalid selected weekdays"),
             Self::Schedule(e) => write!(f, "schedule error: {e}"),
+            Self::NoRecordFolder => write!(f, "no Record Folder configured"),
+            Self::MonitoringPaused => write!(f, "global monitoring is paused"),
+            Self::Presenter(e) => write!(f, "record generation failed: {e}"),
         }
     }
 }
@@ -318,6 +435,47 @@ mod tests {
             store,
             [Box::new(GitConnectorExtension) as Box<dyn ConnectorExtension>],
         )
+    }
+    fn record_presenter() -> Presenter {
+        let mut registry = schomburg_connector::PresentationRegistry::default();
+        registry
+            .register(Box::new(schomburg_connector_git::GitPresenter::new()))
+            .expect("presenter");
+        Presenter::new(registry)
+    }
+
+    #[test]
+    fn update_record_requires_folder_and_respects_pause() {
+        let store = Store::open_in_memory().expect("store");
+        let agent = agent(&store);
+        let presenter = record_presenter();
+        assert!(matches!(
+            agent.update_record_once(&presenter, false),
+            Err(AgentError::NoRecordFolder)
+        ));
+        let mut config = store.reconciliation_configuration().expect("config");
+        config.record_folder = Some(
+            std::env::temp_dir()
+                .join("schomburg-agent-update-test")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        store
+            .save_reconciliation_configuration(&config)
+            .expect("save");
+        assert!(matches!(
+            agent.update_record_once(&presenter, false),
+            Err(AgentError::MonitoringPaused)
+        ));
+        let result = agent.update_record_once(&presenter, true).expect("forced");
+        assert_eq!(result.imported, 0);
+        assert_eq!(
+            store
+                .reconciliation_configuration()
+                .expect("config")
+                .monitoring,
+            GlobalMonitoringState::Paused
+        );
     }
 
     fn configuration(

@@ -8,6 +8,7 @@ publish = false
 schomburg-connector = { path = "../schomburg-connector" }
 schomburg-engine = { path = "../schomburg-engine" }
 schomburg-store = { path = "../schomburg-store" }
+schomburg-presenter = { path = "../schomburg-presenter" }
 time = { version = "0.3.53", default-features = false, features = ["local-offset"] }
 
 [dev-dependencies]

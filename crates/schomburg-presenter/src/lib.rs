@@ -153,6 +153,10 @@ impl Presenter {
         Ok(result)
     }
 }
+/// Returns the local calendar date used for record grouping.
+pub fn record_date_for(value: SystemTime) -> Result<RecordDate, PresenterError> {
+    local_parts(value).map(|(date, _, _)| date)
+}
 fn local_parts(value: SystemTime) -> Result<(RecordDate, String, String), PresenterError> {
     let utc = OffsetDateTime::from(value);
     let local = utc.to_offset(
