@@ -8,6 +8,7 @@ use schomburg_connector::{
 use schomburg_connector_git::{GitConnector, GitConnectorExtension, GitPresenter};
 use schomburg_core::{Event, EventId, MediaType};
 use schomburg_engine::Engine;
+use schomburg_presenter::{Presenter, RecordDate};
 use schomburg_store::{Store, StoreError};
 use std::{
     collections::BTreeMap,
@@ -41,6 +42,60 @@ pub fn execute(arguments: &[String]) -> Result<String, CliError> {
             schomburg_store::ConnectionStatus::Disconnected,
         ),
         Some("collect") => collect_command(&arguments[1..]),
+        Some("record") => record_command(&arguments[1..]),
+        _ => Err(CliError::Usage(usage().to_owned())),
+    }
+}
+
+fn record_command(arguments: &[String]) -> Result<String, CliError> {
+    match arguments.first().map(String::as_str) {
+        Some("generate") => {
+            let options = parse_options(&arguments[1..], &["db", "folder", "date"])?;
+            let store = Store::open(required_option(&options, "db")?).map_err(CliError::Store)?;
+            let mut registry = PresentationRegistry::default();
+            registry
+                .register(Box::new(GitPresenter::new()))
+                .map_err(CliError::Presentation)?;
+            let presenter = Presenter::new(registry);
+            let result = match options.get("date") {
+                Some(date) => presenter.generate_date(
+                    &store,
+                    Path::new(required_option(&options, "folder")?),
+                    RecordDate::parse(date).map_err(|e| CliError::Presenter(e.to_string()))?,
+                ),
+                None => {
+                    presenter.generate_all(&store, Path::new(required_option(&options, "folder")?))
+                }
+            }
+            .map_err(|e| CliError::Presenter(e.to_string()))?;
+            Ok(format!(
+                "dates generated: {}\nfiles created: {}\nfiles updated: {}\nfiles unchanged: {}\nevents presented: {}\npresentation errors: {}\n",
+                result.dates_generated,
+                result.files_created,
+                result.files_updated,
+                result.files_unchanged,
+                result.events_presented,
+                result.presentation_errors
+            ))
+        }
+        Some("open") => {
+            let options = parse_options(&arguments[1..], &["folder"])?;
+            let folder = required_option(&options, "folder")?;
+            #[cfg(target_os = "macos")]
+            {
+                std::process::Command::new("open")
+                    .arg(folder)
+                    .status()
+                    .map_err(|e| CliError::Presenter(e.to_string()))?;
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                return Err(CliError::Presenter(
+                    "record open is currently supported only on macOS".to_owned(),
+                ));
+            }
+            Ok(format!("opened: {folder}\n"))
+        }
         _ => Err(CliError::Usage(usage().to_owned())),
     }
 }
@@ -431,7 +486,10 @@ pub enum CliError {
     /// No event exists with the requested identifier.
     EventNotFound(String),
     /// The database parent directory could not be created.
-    DatabasePath { path: PathBuf, message: String },
+    DatabasePath {
+        path: PathBuf,
+        message: String,
+    },
     /// The store could not open or read the database.
     Store(StoreError),
     /// The Git connector could not open or import the repository.
@@ -442,10 +500,13 @@ pub enum CliError {
     MissingImportReport,
     /// Agent discovery or collection failed.
     Agent(schomburg_agent::AgentError),
+    Presenter(String),
     /// Connector-owned presentation could not render stored factual evidence.
     Presentation(PresentationError),
     /// A stored timestamp could not be formatted in the local timezone.
-    Timestamp { message: String },
+    Timestamp {
+        message: String,
+    },
 }
 
 impl fmt::Display for CliError {
@@ -468,6 +529,7 @@ impl fmt::Display for CliError {
             Self::Engine(error) => write!(formatter, "connector error: {error}"),
             Self::MissingImportReport => write!(formatter, "Git import completed without a report"),
             Self::Agent(error) => write!(formatter, "agent error: {error}"),
+            Self::Presenter(error) => write!(formatter, "record presenter error: {error}"),
             Self::Presentation(error) => write!(formatter, "presentation error: {error}"),
             Self::Timestamp { message } => {
                 write!(formatter, "timestamp formatting error: {message}")
