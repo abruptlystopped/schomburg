@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/master.swiftdeps"
+  },
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Tests/SchomburgMacOSTests/SchomburgMacOSTests.swift": {
+    "dependencies": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests.d",
+    "object": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests.swift.o",
+    "swiftmodule": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests.swiftdeps",
+    "diagnostics": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests.dia"
+  }
+}

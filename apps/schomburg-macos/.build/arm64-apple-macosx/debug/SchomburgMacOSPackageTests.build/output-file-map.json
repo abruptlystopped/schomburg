@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/master.swiftdeps"
+  },
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.derived/runner.swift": {
+    "dependencies": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner.d",
+    "object": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner.swift.o",
+    "swiftmodule": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner~partial.swiftmodule",
+    "swift-dependencies": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner.swiftdeps",
+    "diagnostics": "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner.dia"
+  }
+}

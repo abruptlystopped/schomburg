@@ -1,0 +1,8 @@
+import XCTest
+@testable import SchomburgMacOS
+
+final class SchomburgMacOSTests: XCTestCase {
+    func testMenuBarVisualStateMapping() { XCTAssertEqual(MenuBarVisualState.map(status: ["monitoring": .string("Paused")], hostUnavailable: false), .off); XCTAssertEqual(MenuBarVisualState.map(status: ["monitoring": .string("Enabled")], hostUnavailable: false), .monitoring); XCTAssertEqual(MenuBarVisualState.map(status: ["monitoring": .string("Enabled"), "attention_required": .bool(true)], hostUnavailable: false), .attention); XCTAssertEqual(MenuBarVisualState.map(status: ["awaiting_consent": .number(1)], hostUnavailable: false), .attention); XCTAssertEqual(MenuBarVisualState.map(status: ["manual_update": .object(["last_error": .string("failed")])], hostUnavailable: false), .attention); XCTAssertEqual(MenuBarVisualState.map(status: ["scheduled_reconciliation": .object(["last_error": .string("failed")])], hostUnavailable: false), .attention); XCTAssertEqual(MenuBarVisualState.map(status: [:], hostUnavailable: true), .attention) }
+    func testAccessibilityAndProcessingIndependence() { XCTAssertEqual(MenuBarVisualState.off.accessibilityLabel, "Schomburg monitoring off"); XCTAssertEqual(MenuBarVisualState.monitoring.accessibilityLabel, "Schomburg monitoring"); XCTAssertEqual(MenuBarVisualState.attention.accessibilityLabel, "Schomburg needs attention"); XCTAssertEqual(MenuBarVisualState.map(status: ["monitoring": .string("Enabled"), "update_running": .bool(true)], hostUnavailable: false), .monitoring) }
+    func testResponseDecoding() throws { let response = try JSONDecoder().decode(HostResponse.self, from: Data(#"{"protocol_version":1,"id":1,"ok":true,"result":{}}"#.utf8)); XCTAssertEqual(response.protocolVersion, 1); XCTAssertTrue(response.ok) }
+}

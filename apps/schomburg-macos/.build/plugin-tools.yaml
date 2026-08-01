@@ -1,0 +1,146 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "SchomburgMacOS-arm64-apple-macosx26.0-debug.exe": ["<SchomburgMacOS-arm64-apple-macosx26.0-debug.exe>"]
+  "SchomburgMacOS-arm64-apple-macosx26.0-debug.module": ["<SchomburgMacOS-arm64-apple-macosx26.0-debug.module>"]
+  "SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.module": ["<SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.module>"]
+  "SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.test": ["<SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.test>"]
+  "SchomburgMacOSTests-arm64-apple-macosx26.0-debug.module": ["<SchomburgMacOSTests-arm64-apple-macosx26.0-debug.module>"]
+  "main": ["<SchomburgMacOS-arm64-apple-macosx26.0-debug.exe>","<SchomburgMacOS-arm64-apple-macosx26.0-debug.module>"]
+  "test": ["<SchomburgMacOS-arm64-apple-macosx26.0-debug.exe>","<SchomburgMacOS-arm64-apple-macosx26.0-debug.module>","<SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.test>","<SchomburgMacOSTests-arm64-apple-macosx26.0-debug.module>"]
+default: "main"
+nodes:
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Sources/SchomburgMacOS/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Tests/SchomburgMacOSTests/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS":
+    is-mutated: true
+commands:
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS-entitlement.plist"]
+    description: "Write auxiliary file /Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS-entitlement.plist"
+
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Sources/SchomburgMacOS/main.swift"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/sources"]
+    description: "Write auxiliary file /Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/sources"
+
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/main.swift.o"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.product/Objects.LinkFileList"
+
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.derived/runner.swift"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/sources"]
+    description: "Write auxiliary file /Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/sources"
+
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.derived/runner.swift":
+    tool: test-entry-point-tool
+    inputs: []
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.derived/runner.swift"]
+
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/main.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests.swift.o"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.product/Objects.LinkFileList"
+
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Tests/SchomburgMacOSTests/SchomburgMacOSTests.swift"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/sources"]
+    description: "Write auxiliary file /Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/sources"
+
+  "/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<SchomburgMacOS-arm64-apple-macosx26.0-debug.exe>":
+    tool: phony
+    inputs: ["<SchomburgMacOS-arm64-apple-macosx26.0-debug.exe-CodeSigning>"]
+    outputs: ["<SchomburgMacOS-arm64-apple-macosx26.0-debug.exe>"]
+
+  "<SchomburgMacOS-arm64-apple-macosx26.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/main.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOS.swiftmodule"]
+    outputs: ["<SchomburgMacOS-arm64-apple-macosx26.0-debug.module>"]
+
+  "<SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSPackageTests.swiftmodule"]
+    outputs: ["<SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.module>"]
+
+  "<SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.test>":
+    tool: phony
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.xctest/Contents/MacOS/SchomburgMacOSPackageTests"]
+    outputs: ["<SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.test>"]
+
+  "<SchomburgMacOSTests-arm64-apple-macosx26.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSTests.swiftmodule"]
+    outputs: ["<SchomburgMacOSTests-arm64-apple-macosx26.0-debug.module>"]
+
+  "C.SchomburgMacOS-arm64-apple-macosx26.0-debug.exe":
+    tool: shell
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/main.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.product/Objects.LinkFileList"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/SchomburgMacOS"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug","-o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS","-module-name","SchomburgMacOS","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_SchomburgMacOS_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx13.0","-Xlinker","-add_ast_path","-Xlinker","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOS.swiftmodule","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.SchomburgMacOS-arm64-apple-macosx26.0-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS-entitlement.plist"]
+    outputs: ["<SchomburgMacOS-arm64-apple-macosx26.0-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/SchomburgMacOS"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS-entitlement.plist","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS"]
+
+  "C.SchomburgMacOS-arm64-apple-macosx26.0-debug.module":
+    tool: shell
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Sources/SchomburgMacOS/main.swift","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/sources"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/main.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOS.swiftmodule"]
+    description: "Compiling Swift Module 'SchomburgMacOS' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","SchomburgMacOS","-emit-dependencies","-emit-module","-emit-module-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOS.swiftmodule","-output-file-map","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/output-file-map.json","-incremental","-c","@/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/sources","-I","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","SchomburgMacOS_main","-parse-as-library","-swift-version","6","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","schomburg_macos"]
+
+  "C.SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.module":
+    tool: shell
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.derived/runner.swift","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSTests.swiftmodule","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/sources"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSPackageTests.swiftmodule"]
+    description: "Compiling Swift Module 'SchomburgMacOSPackageTests' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","SchomburgMacOSPackageTests","-emit-dependencies","-emit-module","-emit-module-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSPackageTests.swiftmodule","-output-file-map","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/sources","-I","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-Xfrontend","-enable-cross-import-overlays","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/include/SchomburgMacOSPackageTests-Swift.h","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","schomburg_macos"]
+
+  "C.SchomburgMacOSPackageTests-arm64-apple-macosx26.0-debug.test":
+    tool: shell
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS.build/main.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.build/runner.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.product/Objects.LinkFileList"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.xctest/Contents/MacOS/SchomburgMacOSPackageTests"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.xctest/Contents/MacOS/SchomburgMacOSPackageTests"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug","-o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.xctest/Contents/MacOS/SchomburgMacOSPackageTests","-module-name","SchomburgMacOSPackageTests","-Xlinker","-no_warn_duplicate_libraries","-Xlinker","-bundle","-Xlinker","-rpath","-Xlinker","@loader_path/../../../","@/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSPackageTests.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx14.0","-Xlinker","-add_ast_path","-Xlinker","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOS.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSPackageTests.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSTests.swiftmodule","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.SchomburgMacOSTests-arm64-apple-macosx26.0-debug.module":
+    tool: shell
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Tests/SchomburgMacOSTests/SchomburgMacOSTests.swift","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOS","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/sources"]
+    outputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/SchomburgMacOSTests.swift.o","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSTests.swiftmodule"]
+    description: "Compiling Swift Module 'SchomburgMacOSTests' (1 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","SchomburgMacOSTests","-emit-dependencies","-emit-module","-emit-module-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules/SchomburgMacOSTests.swiftmodule","-output-file-map","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/SchomburgMacOSTests.build/sources","-I","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx14.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-Xfrontend","-enable-cross-import-overlays","-j10","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-swift-version","6","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.1.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","schomburg_macos"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Sources/SchomburgMacOS/","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Tests/SchomburgMacOSTests/","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Package.swift","/Users/ketones/Documents/projects/schomburg/apps/schomburg-macos/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+
