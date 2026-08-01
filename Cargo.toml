@@ -6,6 +6,7 @@ members = [
     "crates/schomburg-connector-git",
     "crates/schomburg-engine",
     "crates/schomburg-store",
+    "crates/schomburg-agent",
 ]
 resolver = "3"
 

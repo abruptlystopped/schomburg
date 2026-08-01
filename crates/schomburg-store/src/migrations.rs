@@ -37,7 +37,20 @@ const MIGRATIONS: &[(i64, &str)] = &[(
     CREATE INDEX idx_annotations_supersedes
         ON annotations(supersedes_annotation_id);
     ",
-)];
+), (2, "
+    CREATE TABLE discovered_sources (
+      id TEXT PRIMARY KEY NOT NULL, connector_id TEXT NOT NULL, source_identity TEXT NOT NULL,
+      display_name TEXT NOT NULL, local_reference TEXT, first_discovered BLOB NOT NULL,
+      last_seen BLOB NOT NULL, status TEXT NOT NULL, metadata_json TEXT NOT NULL, configuration TEXT NOT NULL,
+      UNIQUE(connector_id, source_identity)
+    );
+    CREATE TABLE connections (
+      id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL REFERENCES discovered_sources(id), connector_id TEXT NOT NULL,
+      status TEXT NOT NULL, policy TEXT NOT NULL, approved_at BLOB NOT NULL, revoked_at BLOB,
+      configuration TEXT NOT NULL, last_attempt BLOB, last_success BLOB, last_error TEXT
+    );
+    CREATE INDEX idx_connections_status ON connections(status, policy);
+")];
 
 pub(crate) fn apply(connection: &mut Connection) -> Result<(), StoreError> {
     connection

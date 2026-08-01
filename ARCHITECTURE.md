@@ -116,6 +116,26 @@ No connector assigns organizational metadata, derives current state, or
 interprets collected evidence. See
 [ADR 0004](docs/adr/0004-connector-contract-and-engine-boundary.md).
 
+## Machine-level discovery and consent
+
+`schomburg-agent` is a portable run-once lifecycle for connector discovery,
+persistent consent, and approved collection. Discovery is not collection:
+connector extensions provide opaque candidates, while only approved enabled
+connections run through connector → engine → store. The engine remains
+source-agnostic; connectors define what can be discovered. Contexts remain
+separate. Pause and disconnect affect future collection only and never delete
+preserved evidence. CLI consent is temporary pending native settings.
+
+Connectors also own factual presentation of the events they produce. The shared
+contract returns structured compact and detailed presentation data, rather than
+preformatted terminal text. A host routes a stored event to a presenter by its
+connector provenance, then renders that data for its terminal or UI. The engine
+and store do not know Git or any other source format. Presenters must reject
+events outside their provenance or supported event kinds; raw evidence remains
+available only through an explicit debug path. Presentation selects and labels
+source facts, but never summarizes or interprets them. See
+[ADR 0006](docs/adr/0006-connector-owned-factual-presentation.md).
+
 ## Git historical import
 
 `schomburg-connector-git` is the first production connector. It imports only
@@ -139,6 +159,12 @@ its identity and produces different event IDs. Rewritten commits no longer
 reachable from `HEAD` are not newly imported, while previously captured events
 remain preserved. See [ADR 0005](docs/adr/0005-git-historical-commit-import.md).
 
+The Git connector presents compact records using the first commit-message line,
+short commit hash, repository display name, and committer time. Its detailed
+record retains the full message, full hash, stored repository reference, both
+Git identities/timestamps/timezones, and parent hashes; the exact raw commit
+object remains available on the CLI's `--raw` path.
+
 ## Decision process
 
 Capture durable, consequential choices as Architecture Decision Records (ADRs)
@@ -147,4 +173,5 @@ recorded in [ADR 0001](docs/adr/0001-event-as-evidence-record.md) and
 [ADR 0002](docs/adr/0002-append-only-organizational-metadata.md), and
 [ADR 0003](docs/adr/0003-sqlite-append-only-persistence.md), and
 [ADR 0004](docs/adr/0004-connector-contract-and-engine-boundary.md), and
-[ADR 0005](docs/adr/0005-git-historical-commit-import.md).
+[ADR 0005](docs/adr/0005-git-historical-commit-import.md), and
+[ADR 0006](docs/adr/0006-connector-owned-factual-presentation.md).

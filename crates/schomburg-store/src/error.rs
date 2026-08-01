@@ -1,3 +1,4 @@
+use crate::{ConnectionId, DiscoveredSourceId};
 use schomburg_core::{AnnotationField, AnnotationId, EventId};
 use std::fmt;
 
@@ -5,7 +6,9 @@ use std::fmt;
 #[derive(Debug)]
 pub enum StoreError {
     /// The SQLite database could not complete an operation.
-    Database { message: String },
+    Database {
+        message: String,
+    },
     /// An event with this stable identifier already exists.
     DuplicateEventId(EventId),
     /// An annotation with this stable identifier already exists.
@@ -31,11 +34,28 @@ pub enum StoreError {
     /// An annotation cannot name itself as its predecessor.
     SelfSupersession(AnnotationId),
     /// Stored data could not be decoded as a supported representation.
-    MalformedStoredData { field: &'static str, detail: String },
+    MalformedStoredData {
+        field: &'static str,
+        detail: String,
+    },
     /// Stored data uses a representation this version does not support.
-    UnsupportedStoredData { field: &'static str, value: String },
+    UnsupportedStoredData {
+        field: &'static str,
+        value: String,
+    },
     /// A value could not be serialized for storage.
-    Serialization { detail: String },
+    Serialization {
+        detail: String,
+    },
+    MissingDiscoveredSource(DiscoveredSourceId),
+    MissingConnection(ConnectionId),
+    ConnectionAlreadyApproved(DiscoveredSourceId),
+    ConnectionNotApproved(DiscoveredSourceId),
+    InvalidConnectionTransition {
+        id: ConnectionId,
+        from: crate::ConnectionStatus,
+        to: crate::ConnectionStatus,
+    },
 }
 
 impl StoreError {
@@ -92,6 +112,25 @@ impl fmt::Display for StoreError {
                 write!(formatter, "unsupported stored {field}: {value}")
             }
             Self::Serialization { detail } => write!(formatter, "serialization failure: {detail}"),
+            Self::MissingDiscoveredSource(id) => {
+                write!(formatter, "missing discovered source: {}", id.as_str())
+            }
+            Self::MissingConnection(id) => write!(formatter, "missing connection: {}", id.as_str()),
+            Self::ConnectionAlreadyApproved(id) => {
+                write!(formatter, "source already approved: {}", id.as_str())
+            }
+            Self::ConnectionNotApproved(id) => write!(
+                formatter,
+                "source is not awaiting approval: {}",
+                id.as_str()
+            ),
+            Self::InvalidConnectionTransition { id, from, to } => write!(
+                formatter,
+                "invalid connection transition for {}: {:?} to {:?}",
+                id.as_str(),
+                from,
+                to
+            ),
         }
     }
 }

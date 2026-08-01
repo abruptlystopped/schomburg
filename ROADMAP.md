@@ -16,6 +16,9 @@ This is a planning scaffold, not a commitment or schedule.
 - [x] Import historical commits from one local Git repository.
 - [x] Provide explicit-path CLI commands for local Git import and factual event
   inspection.
+- [x] Define connector-owned, structured factual presentation for stored
+  evidence.
+- [x] Establish machine-level discovery, consent, persistent connections, and a run-once agent lifecycle for supported connectors.
 - [x] Record the foundation decisions as an ADR.
 - [ ] Select an MSRV policy before the first public package release.
 

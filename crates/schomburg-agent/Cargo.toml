@@ -1,17 +1,14 @@
 [package]
-name = "schomburg-cli"
+name = "schomburg-agent"
 version = "0.0.0"
 edition.workspace = true
 publish = false
 
 [dependencies]
-schomburg-core = { path = "../schomburg-core" }
 schomburg-connector = { path = "../schomburg-connector" }
-schomburg-connector-git = { path = "../schomburg-connector-git" }
 schomburg-engine = { path = "../schomburg-engine" }
 schomburg-store = { path = "../schomburg-store" }
-schomburg-agent = { path = "../schomburg-agent" }
-time = { version = "0.3.53", default-features = false, features = ["formatting", "local-offset", "macros"] }
 
 [dev-dependencies]
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+schomburg-connector-git = { path = "../schomburg-connector-git" }

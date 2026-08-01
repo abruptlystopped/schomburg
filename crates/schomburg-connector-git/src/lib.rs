@@ -5,8 +5,10 @@
 
 use git2::{ObjectType, Oid, Repository, Sort};
 use schomburg_connector::{
-    Connector, ConnectorCapabilities, ConnectorCapability, ConnectorDescriptor, ConnectorError,
-    EventAcceptanceError, EventSink,
+    CompactPresentation, Connector, ConnectorCapabilities, ConnectorCapability,
+    ConnectorDescriptor, ConnectorError, ConnectorExtension, DetailedPresentation,
+    DiscoveredSourceCandidate, EventAcceptanceError, EventPresenter, EventSink, ExtensionError,
+    PresentationError, PresentationField, RawEvidence,
 };
 use schomburg_core::{
     CaptureTimestamp, ConnectorId, Event, EventId, EventKind, EventPayload, EventTimestamp,
@@ -23,11 +25,56 @@ use std::{
 const CONNECTOR_ID: &str = "schomburg.git";
 const EVENT_KIND: &str = "git.commit";
 const EVENT_SCHEMA_VERSION: &str = "1";
+const MAX_DISCOVERY_DEPTH: usize = 8;
+
+/// Git's discovery and approved-connection extension for the local agent.
+#[derive(Default)]
+pub struct GitConnectorExtension;
+
+impl ConnectorExtension for GitConnectorExtension {
+    fn connector_id(&self) -> &ConnectorId {
+        static ID: std::sync::OnceLock<ConnectorId> = std::sync::OnceLock::new();
+        ID.get_or_init(|| ConnectorId::new(CONNECTOR_ID))
+    }
+
+    fn descriptor(&self) -> ConnectorDescriptor {
+        ConnectorDescriptor::new(
+            ConnectorId::new(CONNECTOR_ID),
+            ConnectorCapabilities::new([ConnectorCapability::new("import.commits")]),
+        )
+    }
+
+    fn discover(
+        &self,
+        roots: &[PathBuf],
+    ) -> Result<Vec<DiscoveredSourceCandidate>, ExtensionError> {
+        let mut candidates = BTreeMap::new();
+        for root in roots {
+            if !root.is_dir() {
+                return Err(ExtensionError::InaccessibleScanRoot {
+                    path: root.clone(),
+                    message: "path is not a readable directory".to_owned(),
+                });
+            }
+            discover_root(root, 0, &mut candidates)?;
+        }
+        Ok(candidates.into_values().collect())
+    }
+
+    fn open_connection(&self, configuration: &str) -> Result<Box<dyn Connector>, ExtensionError> {
+        GitConnector::open(configuration)
+            .map(|connector| Box::new(connector) as Box<dyn Connector>)
+            .map_err(|error| ExtensionError::ConnectionFailed {
+                message: error.to_string(),
+            })
+    }
+}
 
 /// Imports commits reachable from `HEAD` in one local Git repository.
 pub struct GitConnector {
     repository: Repository,
     repository_reference: String,
+    repository_display_name: String,
     descriptor: ConnectorDescriptor,
     last_report: Option<GitImportReport>,
 }
@@ -63,10 +110,12 @@ impl GitConnector {
                 message: error.to_string(),
             })?;
         let repository_reference = format!("git-dir-hex:{}", hex(&path_identity_bytes(&git_dir)));
+        let repository_display_name = repository_display_name(&git_dir);
 
         Ok(Self {
             repository,
             repository_reference,
+            repository_display_name,
             descriptor: ConnectorDescriptor::new(
                 ConnectorId::new(CONNECTOR_ID),
                 ConnectorCapabilities::new([ConnectorCapability::new("import.commits")]),
@@ -191,6 +240,10 @@ impl GitConnector {
             MetadataValue::new(self.repository_reference.clone()),
         );
         metadata.insert(
+            MetadataKey::new("git.repository_display_name"),
+            MetadataValue::new(self.repository_display_name.clone()),
+        );
+        metadata.insert(
             MetadataKey::new("git.commit_hash"),
             MetadataValue::new(oid.to_string()),
         );
@@ -222,6 +275,91 @@ impl GitConnector {
     }
 }
 
+/// Factual Git commit presenter, independent of collection and storage.
+#[derive(Clone, Debug)]
+pub struct GitPresenter {
+    connector_id: ConnectorId,
+}
+
+impl Default for GitPresenter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GitPresenter {
+    /// Creates a presenter for events produced by the Git connector.
+    pub fn new() -> Self {
+        Self {
+            connector_id: ConnectorId::new(CONNECTOR_ID),
+        }
+    }
+}
+
+impl EventPresenter for GitPresenter {
+    fn connector_id(&self) -> &ConnectorId {
+        &self.connector_id
+    }
+
+    fn present_compact(&self, event: &Event) -> Result<CompactPresentation, PresentationError> {
+        let commit = parse_git_commit(event, &self.connector_id)?;
+        Ok(CompactPresentation::new(
+            "Git",
+            commit.subject,
+            Some(commit.repository_display_name.clone()),
+            event.occurred_at().as_system_time(),
+            vec![PresentationField::new(
+                "Commit",
+                short_hash(&commit.commit_hash),
+            )],
+            vec![PresentationField::new(
+                "Repository",
+                commit.repository_display_name,
+            )],
+        ))
+    }
+
+    fn present_detailed(&self, event: &Event) -> Result<DetailedPresentation, PresentationError> {
+        let commit = parse_git_commit(event, &self.connector_id)?;
+        let parents = if commit.parent_hashes.is_empty() {
+            "(none)".to_owned()
+        } else {
+            commit.parent_hashes.join(", ")
+        };
+        Ok(DetailedPresentation::new(
+            "Git",
+            commit.subject,
+            event.occurred_at().as_system_time(),
+            vec![
+                PresentationField::new("Repository", commit.repository_display_name),
+                PresentationField::new("Commit hash", commit.commit_hash),
+                PresentationField::new("Author name", commit.author.name),
+                PresentationField::new("Author email", commit.author.email),
+                PresentationField::new("Author timestamp", commit.author.seconds.to_string()),
+                PresentationField::new("Author timezone", commit.author.timezone),
+                PresentationField::new("Committer name", commit.committer.name),
+                PresentationField::new("Committer email", commit.committer.email),
+                PresentationField::new("Committer timestamp", commit.committer.seconds.to_string()),
+                PresentationField::new("Committer timezone", commit.committer.timezone),
+                PresentationField::new("Parent hashes", parents),
+                PresentationField::new("Commit message", commit.message),
+            ],
+            vec![PresentationField::new(
+                "Repository reference",
+                commit.repository_reference,
+            )],
+            Some(RawEvidence::new(
+                "Raw Git commit object",
+                event
+                    .payload()
+                    .media_type()
+                    .map(|media_type| media_type.as_str().to_owned()),
+                event.payload().bytes().clone(),
+            )),
+        ))
+    }
+}
+
 impl Connector for GitConnector {
     fn descriptor(&self) -> &ConnectorDescriptor {
         &self.descriptor
@@ -231,6 +369,20 @@ impl Connector for GitConnector {
         self.import(sink)
             .map(|_| ())
             .map_err(|error| ConnectorError::collection_failed(error.to_string()))
+    }
+}
+
+impl EventPresenter for GitConnector {
+    fn connector_id(&self) -> &ConnectorId {
+        self.descriptor.id()
+    }
+
+    fn present_compact(&self, event: &Event) -> Result<CompactPresentation, PresentationError> {
+        GitPresenter::new().present_compact(event)
+    }
+
+    fn present_detailed(&self, event: &Event) -> Result<DetailedPresentation, PresentationError> {
+        GitPresenter::new().present_detailed(event)
     }
 }
 
@@ -315,6 +467,223 @@ fn system_time_from_git_seconds(seconds: i64) -> Option<SystemTime> {
     } else {
         UNIX_EPOCH.checked_sub(duration)
     }
+}
+
+fn repository_display_name(git_dir: &Path) -> String {
+    let repository_root = git_dir
+        .file_name()
+        .filter(|name| *name == ".git")
+        .and_then(|_| git_dir.parent())
+        .unwrap_or(git_dir);
+    repository_root
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| repository_root.to_string_lossy().into_owned())
+}
+
+fn discover_root(
+    directory: &Path,
+    depth: usize,
+    candidates: &mut BTreeMap<String, DiscoveredSourceCandidate>,
+) -> Result<(), ExtensionError> {
+    if depth > MAX_DISCOVERY_DEPTH {
+        return Ok(());
+    }
+    let entries =
+        fs::read_dir(directory).map_err(|error| ExtensionError::InaccessibleScanRoot {
+            path: directory.to_path_buf(),
+            message: error.to_string(),
+        })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| ExtensionError::DiscoveryFailed {
+            message: error.to_string(),
+        })?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| ExtensionError::DiscoveryFailed {
+                message: error.to_string(),
+            })?;
+        if file_type.is_symlink() || !file_type.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if matches!(
+            name.as_ref(),
+            ".git" | "target" | "node_modules" | ".schomburg" | ".build" | "build" | "dist"
+        ) {
+            continue;
+        }
+        let git_marker = path.join(".git");
+        if git_marker.exists() {
+            let repository =
+                Repository::open(&path).map_err(|error| ExtensionError::DiscoveryFailed {
+                    message: format!("open {}: {error}", path.display()),
+                })?;
+            let git_dir = fs::canonicalize(repository.path()).map_err(|error| {
+                ExtensionError::DiscoveryFailed {
+                    message: error.to_string(),
+                }
+            })?;
+            let identity = format!("git-dir-hex:{}", hex(&path_identity_bytes(&git_dir)));
+            let mut metadata = BTreeMap::new();
+            metadata.insert("git.repository_reference".to_owned(), identity.clone());
+            candidates.entry(identity.clone()).or_insert_with(|| {
+                DiscoveredSourceCandidate::new(
+                    ConnectorId::new(CONNECTOR_ID),
+                    identity,
+                    repository_display_name(&git_dir),
+                    Some(path.to_string_lossy().into_owned()),
+                    metadata,
+                    path.to_string_lossy().into_owned(),
+                )
+            });
+            continue;
+        }
+        discover_root(&path, depth + 1, candidates)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct ParsedGitCommit {
+    repository_display_name: String,
+    repository_reference: String,
+    commit_hash: String,
+    parent_hashes: Vec<String>,
+    author: GitIdentity,
+    committer: GitIdentity,
+    subject: String,
+    message: String,
+}
+
+#[derive(Debug)]
+struct GitIdentity {
+    name: String,
+    email: String,
+    seconds: i64,
+    timezone: String,
+}
+
+fn parse_git_commit(
+    event: &Event,
+    connector_id: &ConnectorId,
+) -> Result<ParsedGitCommit, PresentationError> {
+    let actual_connector_id = event.source().connector_id();
+    if actual_connector_id != connector_id {
+        return Err(PresentationError::ConnectorProvenanceMismatch {
+            expected: connector_id.clone(),
+            actual: actual_connector_id.clone(),
+        });
+    }
+    if event.kind().as_str() != EVENT_KIND {
+        return Err(PresentationError::UnsupportedEventKind(
+            event.kind().clone(),
+        ));
+    }
+
+    let metadata = event.payload().metadata();
+    let repository_display_name = required_metadata(metadata, "git.repository_display_name")?;
+    let repository_reference = required_metadata(metadata, "git.repository_reference")?;
+    let commit_hash = required_metadata(metadata, "git.commit_hash")?;
+    let raw = std::str::from_utf8(event.payload().bytes()).map_err(|_| {
+        PresentationError::MalformedPayload {
+            detail: "raw Git commit object is not UTF-8".to_owned(),
+        }
+    })?;
+    let (headers, message) =
+        raw.split_once("\n\n")
+            .ok_or_else(|| PresentationError::MalformedPayload {
+                detail: "raw Git commit object has no header separator".to_owned(),
+            })?;
+
+    let mut author = None;
+    let mut committer = None;
+    let mut parent_hashes = Vec::new();
+    for header in headers.lines() {
+        if let Some(value) = header.strip_prefix("parent ") {
+            parent_hashes.push(value.to_owned());
+        } else if let Some(value) = header.strip_prefix("author ") {
+            author = Some(parse_identity(value, "author")?);
+        } else if let Some(value) = header.strip_prefix("committer ") {
+            committer = Some(parse_identity(value, "committer")?);
+        }
+    }
+    let subject = message.lines().next().unwrap_or_default().to_owned();
+
+    Ok(ParsedGitCommit {
+        repository_display_name,
+        repository_reference,
+        commit_hash,
+        parent_hashes,
+        author: author.ok_or(PresentationError::MissingFactualField {
+            field: "raw Git commit author",
+        })?,
+        committer: committer.ok_or(PresentationError::MissingFactualField {
+            field: "raw Git commit committer",
+        })?,
+        subject,
+        message: message.to_owned(),
+    })
+}
+
+fn required_metadata(
+    metadata: &BTreeMap<MetadataKey, MetadataValue>,
+    key: &'static str,
+) -> Result<String, PresentationError> {
+    metadata
+        .get(&MetadataKey::new(key))
+        .map(|value| value.as_str().to_owned())
+        .ok_or(PresentationError::MissingFactualField { field: key })
+}
+
+fn parse_identity(value: &str, field: &'static str) -> Result<GitIdentity, PresentationError> {
+    let (name, suffix) =
+        value
+            .rsplit_once(" <")
+            .ok_or_else(|| PresentationError::MalformedPayload {
+                detail: format!("raw Git commit {field} is missing a name or email"),
+            })?;
+    let (email, timestamp) =
+        suffix
+            .split_once("> ")
+            .ok_or_else(|| PresentationError::MalformedPayload {
+                detail: format!("raw Git commit {field} is missing timestamp data"),
+            })?;
+    let mut parts = timestamp.split_whitespace();
+    let seconds = parts
+        .next()
+        .ok_or(PresentationError::MissingFactualField {
+            field: "raw Git commit timestamp",
+        })?
+        .parse::<i64>()
+        .map_err(|_| PresentationError::InvalidTimestamp {
+            detail: format!("raw Git commit {field} timestamp is not an integer"),
+        })?;
+    let timezone = parts.next().ok_or(PresentationError::MissingFactualField {
+        field: "raw Git commit timezone",
+    })?;
+    if parts.next().is_some() {
+        return Err(PresentationError::MalformedPayload {
+            detail: format!("raw Git commit {field} has trailing timestamp data"),
+        });
+    }
+    if system_time_from_git_seconds(seconds).is_none() {
+        return Err(PresentationError::InvalidTimestamp {
+            detail: format!("raw Git commit {field} timestamp is outside SystemTime range"),
+        });
+    }
+    Ok(GitIdentity {
+        name: name.to_owned(),
+        email: email.to_owned(),
+        seconds,
+        timezone: timezone.to_owned(),
+    })
+}
+
+fn short_hash(hash: &str) -> String {
+    hash.chars().take(12).collect()
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -582,5 +951,105 @@ mod tests {
             sink.events[0].source().connector_id().as_str(),
             CONNECTOR_ID
         );
+    }
+
+    #[test]
+    fn presenter_returns_factual_compact_and_detailed_commit_data() {
+        let repository = TemporaryRepository::new();
+        let message = "subject café\n\nfull message\nwith another line\n";
+        let commit_id = commit(&repository.repository, message, 30, 40, &[]);
+        let mut connector = GitConnector::open(&repository.path).expect("open connector");
+        let mut sink = RecordingSink { events: Vec::new() };
+        connector.import(&mut sink).expect("import commit");
+        let event = &sink.events[0];
+        let presenter = GitPresenter::new();
+
+        let compact = presenter
+            .present_compact(event)
+            .expect("compact presentation");
+        let detailed = presenter
+            .present_detailed(event)
+            .expect("detailed presentation");
+
+        assert_eq!(compact.source_label(), "Git");
+        assert_eq!(compact.title(), "subject café");
+        assert!(compact.subtitle().is_some_and(|name| !name.is_empty()));
+        assert_eq!(
+            compact.identifiers()[0].value(),
+            &commit_id.to_string()[..12]
+        );
+        assert!(
+            detailed
+                .fields()
+                .iter()
+                .any(|field| field.label() == "Commit message" && field.value() == message)
+        );
+        assert!(
+            detailed
+                .fields()
+                .iter()
+                .any(|field| field.label() == "Commit hash"
+                    && field.value() == commit_id.to_string())
+        );
+        assert_eq!(
+            detailed.raw_evidence().expect("raw evidence").bytes(),
+            event.payload().bytes()
+        );
+    }
+
+    #[test]
+    fn presenter_rejects_unowned_kind_and_malformed_payload() {
+        let repository = TemporaryRepository::new();
+        commit(&repository.repository, "subject", 10, 20, &[]);
+        let mut connector = GitConnector::open(&repository.path).expect("open connector");
+        let mut sink = RecordingSink { events: Vec::new() };
+        connector.import(&mut sink).expect("import commit");
+        let event = &sink.events[0];
+        let presenter = GitPresenter::new();
+
+        let wrong_connector = Event::new(
+            event.id().clone(),
+            event.occurred_at().clone(),
+            Source::new(
+                ConnectorId::new("other.connector"),
+                event.source().reference().clone(),
+            ),
+            event.kind().clone(),
+            event.payload().clone(),
+            event.captured_at().clone(),
+            event.schema_version().clone(),
+        );
+        assert!(matches!(
+            presenter.present_compact(&wrong_connector),
+            Err(PresentationError::ConnectorProvenanceMismatch { .. })
+        ));
+
+        let wrong_kind = Event::new(
+            event.id().clone(),
+            event.occurred_at().clone(),
+            event.source().clone(),
+            EventKind::new("other.event"),
+            event.payload().clone(),
+            event.captured_at().clone(),
+            event.schema_version().clone(),
+        );
+        assert!(matches!(
+            presenter.present_compact(&wrong_kind),
+            Err(PresentationError::UnsupportedEventKind(_))
+        ));
+
+        let malformed = Event::new(
+            event.id().clone(),
+            event.occurred_at().clone(),
+            event.source().clone(),
+            event.kind().clone(),
+            EventPayload::new(Arc::from(b"not a commit".to_vec()), None, BTreeMap::new()),
+            event.captured_at().clone(),
+            event.schema_version().clone(),
+        );
+        assert!(matches!(
+            presenter.present_compact(&malformed),
+            Err(PresentationError::MissingFactualField { .. })
+        ));
     }
 }

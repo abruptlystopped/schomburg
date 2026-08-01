@@ -5,9 +5,11 @@
 
 mod error;
 mod migrations;
+mod operations;
 mod serialization;
 
 pub use error::StoreError;
+pub use operations::*;
 
 use migrations::apply as apply_migrations;
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -17,7 +19,7 @@ use schomburg_core::{
     EventPayload, EventTimestamp, MediaType, SchemaVersion, Source, SourceReference,
 };
 use serialization::{decode_metadata, decode_timestamp, encode_metadata, encode_timestamp};
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, time::SystemTime};
 
 /// An embedded, append-only store for Schomburg events and annotations.
 ///
@@ -250,6 +252,147 @@ impl Store {
             .map(|result| result.is_some())
             .map_err(StoreError::database)
     }
+
+    /// Creates or refreshes a connector-owned discovery candidate without collecting evidence.
+    pub fn upsert_discovered_source(
+        &self,
+        source: &DiscoveredSource,
+    ) -> Result<DiscoveredSource, StoreError> {
+        let metadata =
+            serde_json::to_string(&source.metadata).map_err(|error| StoreError::Serialization {
+                detail: error.to_string(),
+            })?;
+        self.connection.execute("INSERT INTO discovered_sources (id,connector_id,source_identity,display_name,local_reference,first_discovered,last_seen,status,metadata_json,configuration) VALUES (?1,?2,?3,?4,?5,?6,?7,'awaiting',?8,?9) ON CONFLICT(connector_id,source_identity) DO UPDATE SET display_name=excluded.display_name,local_reference=excluded.local_reference,last_seen=excluded.last_seen,metadata_json=excluded.metadata_json,configuration=excluded.configuration", params![source.id.as_str(), source.connector_id.as_str(), source.source_identity, source.display_name, source.local_reference, encode_timestamp(source.first_discovered).as_slice(), encode_timestamp(source.last_seen).as_slice(), metadata, source.configuration]).map_err(StoreError::database)?;
+        self.get_discovered_by_identity(&source.connector_id, &source.source_identity)?
+            .ok_or(StoreError::MalformedStoredData {
+                field: "discovered source",
+                detail: "upsert returned no row".to_owned(),
+            })
+    }
+    pub fn list_discovered_sources(&self) -> Result<Vec<DiscoveredSource>, StoreError> {
+        self.read_sources("SELECT id,connector_id,source_identity,display_name,local_reference,first_discovered,last_seen,status,metadata_json,configuration FROM discovered_sources ORDER BY first_discovered,id", [])
+    }
+    pub fn get_discovered_source(
+        &self,
+        id: &DiscoveredSourceId,
+    ) -> Result<Option<DiscoveredSource>, StoreError> {
+        self.connection.query_row("SELECT id,connector_id,source_identity,display_name,local_reference,first_discovered,last_seen,status,metadata_json,configuration FROM discovered_sources WHERE id=?1", [id.as_str()], stored_source).optional().map_err(StoreError::database)?.map(decode_source).transpose()
+    }
+    fn get_discovered_by_identity(
+        &self,
+        connector: &ConnectorId,
+        identity: &str,
+    ) -> Result<Option<DiscoveredSource>, StoreError> {
+        self.connection.query_row("SELECT id,connector_id,source_identity,display_name,local_reference,first_discovered,last_seen,status,metadata_json,configuration FROM discovered_sources WHERE connector_id=?1 AND source_identity=?2", params![connector.as_str(),identity], stored_source).optional().map_err(StoreError::database)?.map(decode_source).transpose()
+    }
+    fn read_sources<P: rusqlite::Params>(
+        &self,
+        sql: &str,
+        params: P,
+    ) -> Result<Vec<DiscoveredSource>, StoreError> {
+        let mut statement = self.connection.prepare(sql).map_err(StoreError::database)?;
+        let rows = statement
+            .query_map(params, stored_source)
+            .map_err(StoreError::database)?;
+        rows.map(|row| row.map_err(StoreError::database).and_then(decode_source))
+            .collect()
+    }
+    pub fn approve_source(
+        &self,
+        source_id: &DiscoveredSourceId,
+        connection_id: &ConnectionId,
+        now: std::time::SystemTime,
+    ) -> Result<ConnectionRecord, StoreError> {
+        let source = self
+            .get_discovered_source(source_id)?
+            .ok_or(StoreError::MissingDiscoveredSource(source_id.clone()))?;
+        if source.status == DiscoveryStatus::Connected {
+            return Err(StoreError::ConnectionAlreadyApproved(source_id.clone()));
+        }
+        if source.status == DiscoveryStatus::Declined {
+            return Err(StoreError::ConnectionNotApproved(source_id.clone()));
+        }
+        self.connection
+            .execute(
+                "UPDATE discovered_sources SET status='connected' WHERE id=?1",
+                [source_id.as_str()],
+            )
+            .map_err(StoreError::database)?;
+        self.connection.execute("INSERT INTO connections (id,source_id,connector_id,status,policy,approved_at,configuration) VALUES (?1,?2,?3,'enabled','always',?4,?5)",params![connection_id.as_str(),source_id.as_str(),source.connector_id.as_str(),encode_timestamp(now).as_slice(),source.configuration]).map_err(StoreError::database)?;
+        self.get_connection(connection_id)?
+            .ok_or(StoreError::MalformedStoredData {
+                field: "connection",
+                detail: "approval returned no row".to_owned(),
+            })
+    }
+    pub fn decline_source(&self, id: &DiscoveredSourceId) -> Result<(), StoreError> {
+        if self.get_discovered_source(id)?.is_none() {
+            return Err(StoreError::MissingDiscoveredSource(id.clone()));
+        }
+        self.connection
+            .execute(
+                "UPDATE discovered_sources SET status='declined' WHERE id=?1",
+                [id.as_str()],
+            )
+            .map_err(StoreError::database)?;
+        Ok(())
+    }
+    pub fn list_connections(&self) -> Result<Vec<ConnectionRecord>, StoreError> {
+        let mut s=self.connection.prepare("SELECT id,source_id,connector_id,status,policy,approved_at,revoked_at,configuration,last_attempt,last_success,last_error FROM connections ORDER BY approved_at,id").map_err(StoreError::database)?;
+        s.query_map([], stored_connection)
+            .map_err(StoreError::database)?
+            .map(|r| r.map_err(StoreError::database).and_then(decode_connection))
+            .collect()
+    }
+    pub fn get_connection(
+        &self,
+        id: &ConnectionId,
+    ) -> Result<Option<ConnectionRecord>, StoreError> {
+        self.connection.query_row("SELECT id,source_id,connector_id,status,policy,approved_at,revoked_at,configuration,last_attempt,last_success,last_error FROM connections WHERE id=?1",[id.as_str()],stored_connection).optional().map_err(StoreError::database)?.map(decode_connection).transpose()
+    }
+    pub fn set_connection_status(
+        &self,
+        id: &ConnectionId,
+        status: ConnectionStatus,
+        now: SystemTime,
+    ) -> Result<(), StoreError> {
+        let current = self
+            .get_connection(id)?
+            .ok_or(StoreError::MissingConnection(id.clone()))?;
+        let valid = matches!(
+            (current.status, status),
+            (
+                ConnectionStatus::Enabled,
+                ConnectionStatus::Paused | ConnectionStatus::Disconnected
+            ) | (
+                ConnectionStatus::Paused,
+                ConnectionStatus::Enabled | ConnectionStatus::Disconnected
+            )
+        );
+        if !valid {
+            return Err(StoreError::InvalidConnectionTransition {
+                id: id.clone(),
+                from: current.status,
+                to: status,
+            });
+        }
+        self.connection.execute("UPDATE connections SET status=?2,policy=?3,revoked_at=CASE WHEN ?2='disconnected' THEN ?4 ELSE revoked_at END WHERE id=?1",params![id.as_str(),connection_status(status),policy_for(status),encode_timestamp(now).as_slice()]).map_err(StoreError::database)?;
+        Ok(())
+    }
+    pub fn update_connection_result(
+        &self,
+        id: &ConnectionId,
+        now: SystemTime,
+        success: bool,
+        error: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let changed=self.connection.execute("UPDATE connections SET last_attempt=?2,last_success=CASE WHEN ?3 THEN ?2 ELSE last_success END,last_error=?4 WHERE id=?1",params![id.as_str(),encode_timestamp(now).as_slice(),success,error]).map_err(StoreError::database)?;
+        if changed == 0 {
+            Err(StoreError::MissingConnection(id.clone()))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 struct StoredEvent {
@@ -263,6 +406,168 @@ struct StoredEvent {
     payload_media_type: Option<String>,
     payload_metadata_json: String,
     schema_version: String,
+}
+
+type StoredSource = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Vec<u8>,
+    Vec<u8>,
+    String,
+    String,
+    String,
+);
+fn stored_source(row: &Row<'_>) -> rusqlite::Result<StoredSource> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+    ))
+}
+fn decode_source(value: StoredSource) -> Result<DiscoveredSource, StoreError> {
+    let (
+        id,
+        connector_id,
+        source_identity,
+        display_name,
+        local_reference,
+        first,
+        last,
+        status,
+        metadata,
+        configuration,
+    ) = value;
+    let metadata =
+        serde_json::from_str(&metadata).map_err(|e| StoreError::MalformedStoredData {
+            field: "discovered source metadata",
+            detail: e.to_string(),
+        })?;
+    Ok(DiscoveredSource {
+        id: DiscoveredSourceId::new(id),
+        connector_id: ConnectorId::new(connector_id),
+        source_identity,
+        display_name,
+        local_reference,
+        first_discovered: decode_timestamp(&first, "source first discovered")?,
+        last_seen: decode_timestamp(&last, "source last seen")?,
+        status: match status.as_str() {
+            "awaiting" => DiscoveryStatus::AwaitingDecision,
+            "declined" => DiscoveryStatus::Declined,
+            "connected" => DiscoveryStatus::Connected,
+            _ => {
+                return Err(StoreError::UnsupportedStoredData {
+                    field: "discovery status",
+                    value: status,
+                });
+            }
+        },
+        metadata,
+        configuration,
+    })
+}
+type StoredConnection = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    Vec<u8>,
+    Option<Vec<u8>>,
+    String,
+    Option<Vec<u8>>,
+    Option<Vec<u8>>,
+    Option<String>,
+);
+fn stored_connection(row: &Row<'_>) -> rusqlite::Result<StoredConnection> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+    ))
+}
+fn decode_connection(v: StoredConnection) -> Result<ConnectionRecord, StoreError> {
+    let (
+        id,
+        source_id,
+        connector_id,
+        status,
+        policy,
+        approved,
+        revoked,
+        configuration,
+        attempt,
+        success,
+        last_error,
+    ) = v;
+    Ok(ConnectionRecord {
+        id: ConnectionId::new(id),
+        source_id: DiscoveredSourceId::new(source_id),
+        connector_id: ConnectorId::new(connector_id),
+        status: match status.as_str() {
+            "enabled" => ConnectionStatus::Enabled,
+            "paused" => ConnectionStatus::Paused,
+            "disconnected" => ConnectionStatus::Disconnected,
+            _ => {
+                return Err(StoreError::UnsupportedStoredData {
+                    field: "connection status",
+                    value: status,
+                });
+            }
+        },
+        policy: match policy.as_str() {
+            "always" => MonitoringPolicy::Always,
+            "paused" => MonitoringPolicy::Paused,
+            _ => {
+                return Err(StoreError::UnsupportedStoredData {
+                    field: "monitoring policy",
+                    value: policy,
+                });
+            }
+        },
+        approved_at: decode_timestamp(&approved, "connection approved")?,
+        revoked_at: revoked
+            .map(|v| decode_timestamp(&v, "connection revoked"))
+            .transpose()?,
+        configuration,
+        last_attempt: attempt
+            .map(|v| decode_timestamp(&v, "connection last attempt"))
+            .transpose()?,
+        last_success: success
+            .map(|v| decode_timestamp(&v, "connection last success"))
+            .transpose()?,
+        last_error,
+    })
+}
+fn connection_status(s: ConnectionStatus) -> &'static str {
+    match s {
+        ConnectionStatus::Enabled => "enabled",
+        ConnectionStatus::Paused => "paused",
+        ConnectionStatus::Disconnected => "disconnected",
+    }
+}
+fn policy_for(s: ConnectionStatus) -> &'static str {
+    match s {
+        ConnectionStatus::Enabled => "always",
+        ConnectionStatus::Paused | ConnectionStatus::Disconnected => "paused",
+    }
 }
 
 impl StoredEvent {

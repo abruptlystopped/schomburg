@@ -1,7 +1,11 @@
 //! Minimal local command-line proof for Schomburg evidence import and display.
 
-use schomburg_connector::Connector;
-use schomburg_connector_git::GitConnector;
+use schomburg_agent::Agent;
+use schomburg_connector::{
+    CompactPresentation, Connector, DetailedPresentation, PresentationError, PresentationField,
+    PresentationRegistry,
+};
+use schomburg_connector_git::{GitConnector, GitConnectorExtension, GitPresenter};
 use schomburg_core::{Event, EventId, MediaType};
 use schomburg_engine::Engine;
 use schomburg_store::{Store, StoreError};
@@ -11,16 +15,117 @@ use std::{
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
+use time::macros::format_description;
+use time::{OffsetDateTime, UtcOffset};
 
 /// Executes one local Schomburg CLI command and returns factual terminal output.
 pub fn execute(arguments: &[String]) -> Result<String, CliError> {
     match arguments.first().map(String::as_str) {
         Some("init") => initialize_database(&parse_options(&arguments[1..], &["db"])?),
         Some("import") => import_command(&arguments[1..]),
-        Some("events") => list_events(&parse_options(&arguments[1..], &["db"])?),
+        Some("events") => list_events(&arguments[1..]),
         Some("event") => show_event(&arguments[1..]),
+        Some("discover") => discover_command(&arguments[1..]),
+        Some("sources") => sources_command(&arguments[1..]),
+        Some("connect") => source_action(&arguments[1..], true),
+        Some("decline") => source_action(&arguments[1..], false),
+        Some("connections") => connections_command(&arguments[1..]),
+        Some("pause") => {
+            connection_action(&arguments[1..], schomburg_store::ConnectionStatus::Paused)
+        }
+        Some("resume") => {
+            connection_action(&arguments[1..], schomburg_store::ConnectionStatus::Enabled)
+        }
+        Some("disconnect") => connection_action(
+            &arguments[1..],
+            schomburg_store::ConnectionStatus::Disconnected,
+        ),
+        Some("collect") => collect_command(&arguments[1..]),
         _ => Err(CliError::Usage(usage().to_owned())),
     }
+}
+
+fn agent(store: &Store) -> Agent<'_> {
+    Agent::new(
+        store,
+        [Box::new(GitConnectorExtension) as Box<dyn schomburg_connector::ConnectorExtension>],
+    )
+}
+
+fn discover_command(arguments: &[String]) -> Result<String, CliError> {
+    let options = parse_options(arguments, &["root", "db"])?;
+    let store = Store::open(required_option(&options, "db")?).map_err(CliError::Store)?;
+    let count = agent(&store)
+        .discover(&[PathBuf::from(required_option(&options, "root")?)])
+        .map_err(CliError::Agent)?;
+    Ok(format!("discovered: {count}\n"))
+}
+
+fn collect_command(arguments: &[String]) -> Result<String, CliError> {
+    let options = parse_options(arguments, &["db"])?;
+    let store = Store::open(required_option(&options, "db")?).map_err(CliError::Store)?;
+    let report = agent(&store).collect_once().map_err(CliError::Agent)?;
+    Ok(format!(
+        "imported: {}\nfailed: {}\nskipped: {}\n",
+        report.imported, report.failed, report.skipped
+    ))
+}
+fn sources_command(arguments: &[String]) -> Result<String, CliError> {
+    let options = parse_options(arguments, &["db"])?;
+    let store = Store::open(required_option(&options, "db")?).map_err(CliError::Store)?;
+    let sources = store.list_discovered_sources().map_err(CliError::Store)?;
+    if sources.is_empty() {
+        return Ok("no discovered sources\n".to_owned());
+    }
+    sources.into_iter().map(|s|Ok(format!("id: {}\nconnector: {}\nname: {}\nreference: {}\nstatus: {:?}\nfirst_discovered: {}\nlast_seen: {}\n",s.id.as_str(),s.connector_id.as_str(),s.display_name,s.local_reference.unwrap_or_else(||"none".to_owned()),s.status,format_local_time(s.first_discovered)?,format_local_time(s.last_seen)?))).collect::<Result<Vec<_>,CliError>>().map(|v|v.join("\n"))
+}
+fn source_action(arguments: &[String], approve: bool) -> Result<String, CliError> {
+    let id = arguments
+        .first()
+        .ok_or_else(|| CliError::Usage(usage().to_owned()))?;
+    let opts = parse_options(&arguments[1..], &["db"])?;
+    let store = Store::open(required_option(&opts, "db")?).map_err(CliError::Store)?;
+    if approve {
+        let connection = agent(&store)
+            .approve(&schomburg_store::DiscoveredSourceId::new(id.clone()))
+            .map_err(CliError::Agent)?;
+        Ok(format!("connected: {}\n", connection.as_str()))
+    } else {
+        agent(&store)
+            .decline(&schomburg_store::DiscoveredSourceId::new(id.clone()))
+            .map_err(CliError::Agent)?;
+        Ok("declined\n".to_owned())
+    }
+}
+fn connections_command(arguments: &[String]) -> Result<String, CliError> {
+    let opts = parse_options(arguments, &["db"])?;
+    let store = Store::open(required_option(&opts, "db")?).map_err(CliError::Store)?;
+    let items = store.list_connections().map_err(CliError::Store)?;
+    if items.is_empty() {
+        return Ok("no connections\n".to_owned());
+    }
+    items.into_iter().map(|c| {
+        Ok(format!("id: {}\nsource: {}\nconnector: {}\nstatus: {:?}\npolicy: {:?}\napproved_at: {}\nlast_attempt: {}\nlast_success: {}\nlast_error: {}\n",
+            c.id.as_str(), c.source_id.as_str(), c.connector_id.as_str(), c.status, c.policy,
+            format_local_time(c.approved_at)?,
+            c.last_attempt.map(format_local_time).transpose()?.unwrap_or_else(|| "never".to_owned()),
+            c.last_success.map(format_local_time).transpose()?.unwrap_or_else(|| "never".to_owned()),
+            c.last_error.unwrap_or_else(|| "none".to_owned())))
+    }).collect::<Result<Vec<_>, CliError>>().map(|v| v.join("\n"))
+}
+fn connection_action(
+    arguments: &[String],
+    status: schomburg_store::ConnectionStatus,
+) -> Result<String, CliError> {
+    let id = arguments
+        .first()
+        .ok_or_else(|| CliError::Usage(usage().to_owned()))?;
+    let opts = parse_options(&arguments[1..], &["db"])?;
+    let store = Store::open(required_option(&opts, "db")?).map_err(CliError::Store)?;
+    agent(&store)
+        .set_status(&schomburg_store::ConnectionId::new(id.clone()), status)
+        .map_err(CliError::Agent)?;
+    Ok(format!("{:?}\n", status).to_lowercase())
 }
 
 fn initialize_database(options: &BTreeMap<String, String>) -> Result<String, CliError> {
@@ -39,7 +144,7 @@ fn import_command(arguments: &[String]) -> Result<String, CliError> {
     let database_path = required_option(&options, "db")?;
     let store = Store::open(database_path).map_err(CliError::Store)?;
     let mut connector = GitConnector::open(repository_path).map_err(CliError::Git)?;
-    let mut engine = Engine::new(store);
+    let mut engine = Engine::new(&store);
     engine
         .register(connector.descriptor().clone())
         .map_err(CliError::Engine)?;
@@ -57,19 +162,33 @@ fn import_command(arguments: &[String]) -> Result<String, CliError> {
     ))
 }
 
-fn list_events(options: &BTreeMap<String, String>) -> Result<String, CliError> {
-    let database_path = required_option(options, "db")?;
+fn list_events(arguments: &[String]) -> Result<String, CliError> {
+    let (raw, options) = parse_presentation_options(arguments)?;
+    let database_path = required_option(&options, "db")?;
     let store = Store::open(database_path).map_err(CliError::Store)?;
     let events = store.list_events().map_err(CliError::Store)?;
     if events.is_empty() {
         return Ok("no events\n".to_owned());
     }
 
-    Ok(events
+    if raw {
+        return Ok(events
+            .iter()
+            .map(format_raw_event_summary)
+            .collect::<Vec<_>>()
+            .join("\n"));
+    }
+    let presenters = presentation_registry()?;
+    events
         .iter()
-        .map(format_event_summary)
-        .collect::<Vec<_>>()
-        .join("\n"))
+        .map(|event| {
+            presenters
+                .present_compact(event)
+                .map_err(CliError::Presentation)
+        })
+        .map(|result| result.and_then(|presentation| format_compact_presentation(&presentation)))
+        .collect::<Result<Vec<_>, _>>()
+        .map(|items| items.join("\n"))
 }
 
 fn show_event(arguments: &[String]) -> Result<String, CliError> {
@@ -79,14 +198,38 @@ fn show_event(arguments: &[String]) -> Result<String, CliError> {
     if event_id.is_empty() || event_id.starts_with("--") {
         return Err(CliError::InvalidEventId(event_id.clone()));
     }
-    let options = parse_options(&arguments[1..], &["db"])?;
+    let (raw, options) = parse_presentation_options(&arguments[1..])?;
     let database_path = required_option(&options, "db")?;
     let store = Store::open(database_path).map_err(CliError::Store)?;
     let event = store
         .get_event(&EventId::new(event_id.clone()))
         .map_err(CliError::Store)?
         .ok_or_else(|| CliError::EventNotFound(event_id.clone()))?;
-    Ok(format_event_record(&event))
+    if raw {
+        return Ok(format_raw_event_record(&event));
+    }
+    let presentation = presentation_registry()?
+        .present_detailed(&event)
+        .map_err(CliError::Presentation)?;
+    format_detailed_presentation(&presentation)
+}
+
+fn parse_presentation_options(
+    arguments: &[String],
+) -> Result<(bool, BTreeMap<String, String>), CliError> {
+    let mut raw = false;
+    let mut value_options = Vec::new();
+    for argument in arguments {
+        if argument == "--raw" {
+            if raw {
+                return Err(CliError::Usage(usage().to_owned()));
+            }
+            raw = true;
+        } else {
+            value_options.push(argument.clone());
+        }
+    }
+    Ok((raw, parse_options(&value_options, &["db"])?))
 }
 
 fn parse_options(
@@ -140,7 +283,72 @@ fn create_database_parent(database_path: &str) -> Result<(), CliError> {
     })
 }
 
-fn format_event_summary(event: &Event) -> String {
+fn presentation_registry() -> Result<PresentationRegistry, CliError> {
+    let mut registry = PresentationRegistry::default();
+    registry
+        .register(Box::new(GitPresenter::new()))
+        .map_err(CliError::Presentation)?;
+    Ok(registry)
+}
+
+fn format_compact_presentation(presentation: &CompactPresentation) -> Result<String, CliError> {
+    let mut output = format!(
+        "{}\n{}\n",
+        presentation.source_label(),
+        presentation.title()
+    );
+    if let Some(subtitle) = presentation.subtitle() {
+        output.push_str(&format!("{subtitle}\n"));
+    }
+    append_fields(&mut output, presentation.identifiers());
+    append_fields(&mut output, presentation.key_fields());
+    output.push_str(&format!(
+        "Occurred: {}\n",
+        format_local_time(presentation.timestamp())?
+    ));
+    Ok(output)
+}
+
+fn format_detailed_presentation(presentation: &DetailedPresentation) -> Result<String, CliError> {
+    let mut output = format!(
+        "{}\n{}\n",
+        presentation.source_label(),
+        presentation.title()
+    );
+    output.push_str(&format!(
+        "Occurred: {}\n",
+        format_local_time(presentation.timestamp())?
+    ));
+    append_fields(&mut output, presentation.fields());
+    if !presentation.technical_identifiers().is_empty() {
+        output.push_str("Technical identifiers:\n");
+        append_fields(&mut output, presentation.technical_identifiers());
+    }
+    Ok(output)
+}
+
+fn append_fields(output: &mut String, fields: &[PresentationField]) {
+    for field in fields {
+        output.push_str(field.label());
+        output.push_str(": ");
+        output.push_str(field.value());
+        output.push('\n');
+    }
+}
+
+fn format_local_time(time: SystemTime) -> Result<String, CliError> {
+    let utc = OffsetDateTime::from(time);
+    let offset = UtcOffset::local_offset_at(utc).map_err(|error| CliError::Timestamp {
+        message: error.to_string(),
+    })?;
+    utc.to_offset(offset)
+        .format(format_description!("[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour sign:mandatory]:[offset_minute]"))
+        .map_err(|error| CliError::Timestamp {
+            message: error.to_string(),
+        })
+}
+
+fn format_raw_event_summary(event: &Event) -> String {
     format!(
         "id: {}\noccurred_at: {}\ncaptured_at: {}\nconnector: {}\nsource: {}\nkind: {}\n",
         event.id().as_str(),
@@ -152,8 +360,8 @@ fn format_event_summary(event: &Event) -> String {
     )
 }
 
-fn format_event_record(event: &Event) -> String {
-    let mut output = format_event_summary(event);
+fn format_raw_event_record(event: &Event) -> String {
+    let mut output = format_raw_event_summary(event);
     output.push_str(&format!(
         "schema_version: {}\n",
         event.schema_version().as_str()
@@ -206,7 +414,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  schomburg init --db <database-path>\n  schomburg import git --repo <repository-path> --db <database-path>\n  schomburg events --db <database-path>\n  schomburg event <event-id> --db <database-path>\n"
+    "usage:\n  schomburg init --db <database-path>\n  schomburg import git --repo <repository-path> --db <database-path>\n  schomburg events --db <database-path> [--raw]\n  schomburg event <event-id> --db <database-path> [--raw]\n"
 }
 
 /// Errors returned by the local proof CLI.
@@ -232,6 +440,12 @@ pub enum CliError {
     Engine(schomburg_engine::EngineError),
     /// The connector did not make an import report available.
     MissingImportReport,
+    /// Agent discovery or collection failed.
+    Agent(schomburg_agent::AgentError),
+    /// Connector-owned presentation could not render stored factual evidence.
+    Presentation(PresentationError),
+    /// A stored timestamp could not be formatted in the local timezone.
+    Timestamp { message: String },
 }
 
 impl fmt::Display for CliError {
@@ -253,6 +467,11 @@ impl fmt::Display for CliError {
             Self::Git(error) => write!(formatter, "Git import error: {error}"),
             Self::Engine(error) => write!(formatter, "connector error: {error}"),
             Self::MissingImportReport => write!(formatter, "Git import completed without a report"),
+            Self::Agent(error) => write!(formatter, "agent error: {error}"),
+            Self::Presentation(error) => write!(formatter, "presentation error: {error}"),
+            Self::Timestamp { message } => {
+                write!(formatter, "timestamp formatting error: {message}")
+            }
         }
     }
 }
@@ -375,14 +594,34 @@ mod tests {
         assert!(first.contains("duplicates: 0"));
         assert!(second.contains("imported: 0"));
         assert!(second.contains("duplicates: 1"));
-        assert!(events.contains(event.id().as_str()));
-        assert!(events.contains("connector: schomburg.git"));
-        assert!(events.contains("kind: git.commit"));
-        assert!(detail.contains(&format!("source: {commit_id}")));
+        assert!(events.contains("Git\nsubject\n"));
+        assert!(events.contains("Repository: repository"));
+        assert!(events.contains(&commit_id.to_string()[..12]));
+        assert!(!events.contains(event.id().as_str()));
+        assert!(!events.contains("git-dir-hex:"));
+        assert!(!events.contains("schema_version:"));
+        assert!(!events.contains("payload_bytes_hex:"));
+        assert!(detail.contains(&format!("Commit hash: {commit_id}")));
         assert!(detail.contains("message café"));
-        assert!(detail.contains("payload_bytes_hex:"));
+        assert!(detail.contains("Author name: Author"));
+        assert!(!detail.contains("payload_bytes_hex:"));
+        assert!(!detail.contains("schema_version:"));
         assert!(!detail.contains("summary:"));
         assert!(!detail.contains("context:"));
+
+        let raw_events = execute(&arguments(&["events", "--db", database_arg, "--raw"]))
+            .expect("raw events command");
+        let raw_detail = execute(&arguments(&[
+            "event",
+            event.id().as_str(),
+            "--db",
+            database_arg,
+            "--raw",
+        ]))
+        .expect("raw event command");
+        assert!(raw_events.contains(event.id().as_str()));
+        assert!(raw_detail.contains("payload_bytes_hex:"));
+        assert!(raw_detail.contains("schema_version:"));
     }
 
     #[test]

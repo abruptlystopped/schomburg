@@ -35,6 +35,7 @@ and `schomburg-engine` for lifecycle, validation, and persistence**.
 `schomburg-connector` depends only on `schomburg-core`. It defines:
 
 - `Connector`, which emits immutable events;
+- connector-owned factual presentation contracts (detailed in ADR 0006);
 - `EventSink`, an engine-owned event destination;
 - immutable connector descriptors and extensible, opaque capabilities;
 - descriptor registration; and
@@ -81,6 +82,7 @@ and source-specific lifecycle policy are deferred.
   capability semantics, and event-level validation beyond connector provenance
   remain undecided.
 - The engine does not derive current state or interpret collected data.
+- The engine does not route or render source-specific presentation.
 
 ## Validation
 

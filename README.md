@@ -41,12 +41,31 @@ cargo run -p schomburg-cli -- import git --repo /Users/ketones/Documents/project
 cargo run -p schomburg-cli -- events --db /Users/ketones/Documents/projects/schomburg/.schomburg/dev.sqlite3
 ```
 
-Copy an `id` from the `events` output, then inspect the complete factual
-record:
+The default list is a compact factual Git view. To inspect one complete
+factual record, obtain its event ID through the explicit raw list:
+
+```sh
+cargo run -p schomburg-cli -- events --db /Users/ketones/Documents/projects/schomburg/.schomburg/dev.sqlite3 --raw
+```
+
+Then inspect the event:
 
 ```sh
 cargo run -p schomburg-cli -- event '<event-id>' --db /Users/ketones/Documents/projects/schomburg/.schomburg/dev.sqlite3
 ```
 
+The default event view is a detailed factual Git presentation. Add `--raw` to
+either `events` or `event` to inspect the complete stored record, including
+technical identifiers, metadata, and exact raw commit evidence.
+
 Running the import command again reports duplicate commit events; it never
 overwrites the existing records.
+
+## Machine-level discovery proof
+
+Discovery is not collection: supported connectors find only candidate sources.
+Consent is required before any evidence import. Approval and decline persist in
+the selected local database across restarts; rediscovery preserves a decline.
+Pause preserves consent, while disconnect stops future collection only. Neither
+operation deletes existing evidence. The CLI consent flow is temporary until a
+native settings experience exists.

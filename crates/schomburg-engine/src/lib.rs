@@ -12,14 +12,14 @@ use schomburg_store::{Store, StoreError};
 use std::fmt;
 
 /// Coordinates registered connectors with append-only event persistence.
-pub struct Engine {
+pub struct Engine<'a> {
     registry: ConnectorRegistry,
-    store: Store,
+    store: &'a Store,
 }
 
-impl Engine {
+impl<'a> Engine<'a> {
     /// Creates an engine backed by the supplied append-only store.
-    pub fn new(store: Store) -> Self {
+    pub fn new(store: &'a Store) -> Self {
         Self {
             registry: ConnectorRegistry::default(),
             store,
@@ -45,7 +45,7 @@ impl Engine {
         }
 
         let mut sink = EngineEventSink {
-            store: &self.store,
+            store: self.store,
             connector_id: descriptor.id().clone(),
             accepted_events: 0,
         };
@@ -132,7 +132,10 @@ impl EventSink for EngineEventSink<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schomburg_connector::{ConnectorCapabilities, ConnectorCapability};
+    use schomburg_connector::{
+        CompactPresentation, ConnectorCapabilities, ConnectorCapability, DetailedPresentation,
+        EventPresenter, PresentationError,
+    };
     use schomburg_connector_git::GitConnector;
     use schomburg_core::{
         CaptureTimestamp, EventId, EventKind, EventPayload, EventTimestamp, SchemaVersion, Source,
@@ -178,6 +181,27 @@ mod tests {
                 sink.accept(event).map_err(ConnectorError::EventRejected)?;
             }
             Ok(())
+        }
+    }
+
+    impl EventPresenter for TestConnector {
+        fn connector_id(&self) -> &ConnectorId {
+            self.descriptor.id()
+        }
+
+        fn present_compact(&self, event: &Event) -> Result<CompactPresentation, PresentationError> {
+            Err(PresentationError::UnsupportedEventKind(
+                event.kind().clone(),
+            ))
+        }
+
+        fn present_detailed(
+            &self,
+            event: &Event,
+        ) -> Result<DetailedPresentation, PresentationError> {
+            Err(PresentationError::UnsupportedEventKind(
+                event.kind().clone(),
+            ))
         }
     }
 
@@ -241,7 +265,7 @@ mod tests {
         let store = Store::open_in_memory().expect("store");
         let event = event("event-1", "fixture");
         let mut connector = TestConnector::new("fixture", vec![event.clone()]);
-        let mut engine = Engine::new(store);
+        let mut engine = Engine::new(&store);
         engine
             .register(connector.descriptor().clone())
             .expect("register connector");
@@ -260,7 +284,7 @@ mod tests {
         let store = Store::open_in_memory().expect("store");
         let event = event("event-1", "fixture");
         let mut connector = TestConnector::new("fixture", vec![event]);
-        let engine = Engine::new(store);
+        let engine = Engine::new(&store);
 
         assert!(matches!(
             engine.collect(&mut connector),
@@ -274,7 +298,7 @@ mod tests {
         let store = Store::open_in_memory().expect("store");
         let event = event("event-1", "other-connector");
         let mut connector = TestConnector::new("fixture", vec![event]);
-        let mut engine = Engine::new(store);
+        let mut engine = Engine::new(&store);
         engine
             .register(connector.descriptor().clone())
             .expect("register connector");
@@ -293,7 +317,7 @@ mod tests {
         let repository = TemporaryGitRepository::new();
         let commit_id = git_commit(&repository.repository, "subject\n\nmessage café\n");
         let store = Store::open_in_memory().expect("store");
-        let mut engine = Engine::new(store);
+        let mut engine = Engine::new(&store);
         let mut first_import = GitConnector::open(&repository.path).expect("open first connector");
         engine
             .register(first_import.descriptor().clone())
