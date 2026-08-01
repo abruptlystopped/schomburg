@@ -1,0 +1,16 @@
+[package]
+name = "schomburg-host"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+schomburg-service = { path = "../schomburg-service" }
+schomburg-store = { path = "../schomburg-store" }
+schomburg-agent = { path = "../schomburg-agent" }
+schomburg-presenter = { path = "../schomburg-presenter" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
