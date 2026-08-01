@@ -8,6 +8,7 @@ members = [
     "crates/schomburg-store",
     "crates/schomburg-agent",
     "crates/schomburg-presenter",
+    "crates/schomburg-service",
 ]
 resolver = "3"
 

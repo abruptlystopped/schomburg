@@ -35,13 +35,22 @@ This is a planning scaffold, not a commitment or schedule.
 
 ### Phase 2.3B — Reconcile once
 
-- [ ] Implement reusable collection and affected-date record generation.
+- [x] Implement reusable collection and affected-date record generation.
 
 ### Phase 2.3C — Scheduler lifecycle
 
 - [ ] Implement portable long-running lifecycle, cancellation, retry, and concurrency policy.
 
 Native macOS menu-bar and Windows tray shells remain later work.
+
+### Phase 2.4 — Portable Service API — Complete
+
+- [x] Add the structured shared control API for the CLI and future shells.
+- [x] Route user-level CLI configuration, discovery, consent, and connection
+  commands through the service.
+- [x] Prevent overlapping Update Record calls within one service instance.
+
+Cross-process locking and scheduler lifecycle remain deferred.
 
 ## Open planning questions
 

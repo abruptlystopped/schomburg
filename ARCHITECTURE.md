@@ -132,6 +132,20 @@ last status fields. It is not evidence and is never stored in Events. Phase
 2.3A calculates eligibility only; `reconcile_once` and a scheduler lifecycle
 remain deferred.
 
+## Portable service boundary
+
+`schomburg-service` is the portable, structured control surface for the CLI,
+future macOS menu-bar shell, Windows tray shell, and other shells. It opens the
+store, registers supported connectors and presenters, and coordinates the
+agent, presenter, and operational configuration. It does not own Events or
+Annotations, parse Git payloads, or duplicate engine or store logic. Shells use
+its structured status and result types; they must not parse CLI output.
+
+The service prevents overlapping Update Record operations within one service
+instance. Cross-process locking, platform-specific folder opening, and the
+long-running scheduler lifecycle remain deferred. macOS will be the first
+shell, not the owner of Schomburg; Windows will use this same boundary.
+
 Connectors also own factual presentation of the events they produce. The shared
 contract returns structured compact and detailed presentation data, rather than
 preformatted terminal text. A host routes a stored event to a presenter by its

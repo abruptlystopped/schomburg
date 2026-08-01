@@ -230,6 +230,7 @@ dependencies = [
  "schomburg-core",
  "schomburg-engine",
  "schomburg-presenter",
+ "schomburg-service",
  "schomburg-store",
  "time",
 ]
@@ -274,6 +275,18 @@ dependencies = [
  "schomburg-core",
  "schomburg-store",
  "time",
+]
+
+[[package]]
+name = "schomburg-service"
+version = "0.0.0"
+dependencies = [
+ "git2",
+ "schomburg-agent",
+ "schomburg-connector",
+ "schomburg-connector-git",
+ "schomburg-presenter",
+ "schomburg-store",
 ]
 
 [[package]]

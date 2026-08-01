@@ -1,0 +1,15 @@
+[package]
+name = "schomburg-service"
+version = "0.0.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+schomburg-agent = { path = "../schomburg-agent" }
+schomburg-connector = { path = "../schomburg-connector" }
+schomburg-connector-git = { path = "../schomburg-connector-git" }
+schomburg-presenter = { path = "../schomburg-presenter" }
+schomburg-store = { path = "../schomburg-store" }
+
+[dev-dependencies]
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }

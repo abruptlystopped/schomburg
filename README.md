@@ -17,4 +17,4 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The next proposed tag is `v0.1.0-alpha.1`; it has not been created.
 
-Phase 2.3A adds persisted reconciliation configuration and portable scheduling math. It does not yet run reconciliation automatically or start a scheduler process.
+Phase 2.4 adds `schomburg-service`, the portable control API used by the CLI and intended for future macOS and Windows shells. It coordinates existing components but does not own evidence. Update Record is available through this API; scheduler lifecycle and cross-process locking remain deferred. See [the Phase 2 guide](docs/phase-2/README.md) and [service API](docs/phase-2/SERVICE_API.md).

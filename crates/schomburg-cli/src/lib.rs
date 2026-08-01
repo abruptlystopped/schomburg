@@ -1,6 +1,6 @@
 //! Minimal local command-line proof for Schomburg evidence import and display.
 
-use schomburg_agent::{Agent, next_eligible_run, parse_local_time, parse_schedule};
+use schomburg_agent::{Agent, parse_local_time, parse_schedule};
 use schomburg_connector::{
     CompactPresentation, Connector, DetailedPresentation, PresentationError, PresentationField,
     PresentationRegistry,
@@ -51,6 +51,15 @@ pub fn execute(arguments: &[String]) -> Result<String, CliError> {
         _ => Err(CliError::Usage(usage().to_owned())),
     }
 }
+
+fn open_service(database_path: &str) -> Result<schomburg_service::SchomburgService, CliError> {
+    schomburg_service::SchomburgService::open(database_path).map_err(service_error)
+}
+
+fn service_error(error: schomburg_service::ServiceError) -> CliError {
+    CliError::Presenter(error.to_string())
+}
+
 fn update_record_command(arguments: &[String]) -> Result<String, CliError> {
     let mut force = false;
     let mut values = Vec::new();
@@ -65,22 +74,15 @@ fn update_record_command(arguments: &[String]) -> Result<String, CliError> {
         }
     }
     let options = parse_options(&values, &["db"])?;
-    let store = Store::open(required_option(&options, "db")?).map_err(CliError::Store)?;
-    let result = agent(&store)
-        .update_record_once(
-            &Presenter::new({
-                let mut registry = PresentationRegistry::default();
-                registry
-                    .register(Box::new(GitPresenter::new()))
-                    .map_err(CliError::Presentation)?;
-                registry
-            }),
-            force,
-        )
-        .map_err(CliError::Agent)?;
-    let state = store
-        .reconciliation_configuration()
-        .map_err(CliError::Store)?
+    let service = schomburg_service::SchomburgService::open(required_option(&options, "db")?)
+        .map_err(|e| CliError::Presenter(e.to_string()))?;
+    let result = service
+        .update_record(force)
+        .map_err(|e| CliError::Presenter(e.to_string()))?;
+    let state = service
+        .status()
+        .map_err(|e| CliError::Presenter(e.to_string()))?
+        .configuration
         .state;
     Ok(format!(
         "imported: {}\nduplicates: {}\nrejected: {}\nfailed: {}\naffected dates: {}\nfiles created: {}\nfiles updated: {}\nfiles unchanged: {}\nfinal reconciliation status: {:?}\n",
@@ -100,27 +102,22 @@ fn record_folder_command(arguments: &[String]) -> Result<String, CliError> {
         return Err(CliError::Usage(usage().to_owned()));
     }
     let o = parse_options(&arguments[1..], &["folder", "db"])?;
-    let s = Store::open(required_option(&o, "db")?).map_err(CliError::Store)?;
-    let mut c = s.reconciliation_configuration().map_err(CliError::Store)?;
-    c.record_folder = Some(required_option(&o, "folder")?.to_owned());
-    s.save_reconciliation_configuration(&c)
-        .map_err(CliError::Store)?;
-    Ok(format!(
-        "record folder: {}\n",
-        c.record_folder.expect("set")
-    ))
+    let folder = required_option(&o, "folder")?;
+    let service = open_service(required_option(&o, "db")?)?;
+    service
+        .set_record_folder(folder.to_owned())
+        .map_err(service_error)?;
+    Ok(format!("record folder: {folder}\n",))
 }
 fn schedule_command(arguments: &[String]) -> Result<String, CliError> {
     match arguments.first().map(String::as_str) {
         Some("set") => {
             let o = parse_options(&arguments[1..], &["time", "days", "db"])?;
-            let s = Store::open(required_option(&o, "db")?).map_err(CliError::Store)?;
-            let mut c = s.reconciliation_configuration().map_err(CliError::Store)?;
+            let service = open_service(required_option(&o, "db")?)?;
+            let mut c = service.get_schedule().map_err(service_error)?;
             c.time = parse_local_time(required_option(&o, "time")?).map_err(CliError::Agent)?;
             c.schedule = parse_schedule(required_option(&o, "days")?).map_err(CliError::Agent)?;
-            c.next_run = next_eligible_run(&c, SystemTime::now()).map_err(CliError::Agent)?;
-            s.save_reconciliation_configuration(&c)
-                .map_err(CliError::Store)?;
+            service.set_schedule(c).map_err(service_error)?;
             Ok("schedule saved\n".to_owned())
         }
         Some("show") => show_config(&arguments[1..]),
@@ -134,16 +131,10 @@ fn monitoring_command(arguments: &[String]) -> Result<String, CliError> {
         _ => return Err(CliError::Usage(usage().to_owned())),
     };
     let o = parse_options(&arguments[1..], &["db"])?;
-    let s = Store::open(required_option(&o, "db")?).map_err(CliError::Store)?;
-    let mut c = s.reconciliation_configuration().map_err(CliError::Store)?;
-    c.monitoring = if enabled {
-        schomburg_store::GlobalMonitoringState::Enabled
-    } else {
-        schomburg_store::GlobalMonitoringState::Paused
-    };
-    c.next_run = next_eligible_run(&c, SystemTime::now()).map_err(CliError::Agent)?;
-    s.save_reconciliation_configuration(&c)
-        .map_err(CliError::Store)?;
+    let service = open_service(required_option(&o, "db")?)?;
+    service
+        .set_monitoring_enabled(enabled)
+        .map_err(service_error)?;
     Ok(format!(
         "monitoring: {}\n",
         if enabled { "enabled" } else { "paused" }
@@ -157,8 +148,8 @@ fn reconcile_status_command(arguments: &[String]) -> Result<String, CliError> {
 }
 fn show_config(arguments: &[String]) -> Result<String, CliError> {
     let o = parse_options(arguments, &["db"])?;
-    let s = Store::open(required_option(&o, "db")?).map_err(CliError::Store)?;
-    let c = s.reconciliation_configuration().map_err(CliError::Store)?;
+    let service = open_service(required_option(&o, "db")?)?;
+    let c = service.status().map_err(service_error)?.configuration;
     Ok(format!(
         "monitoring: {:?}\nstate: {:?}\nrecord folder: {}\nschedule: {:?}\ntime: {:02}:{:02}\nnext run: {}\nlast attempt: {}\nlast success: {}\nlast error: {}\ncounts: imported={} duplicates={} rejected={} failed={}\n",
         c.monitoring,
@@ -250,10 +241,10 @@ fn agent(store: &Store) -> Agent<'_> {
 
 fn discover_command(arguments: &[String]) -> Result<String, CliError> {
     let options = parse_options(arguments, &["root", "db"])?;
-    let store = Store::open(required_option(&options, "db")?).map_err(CliError::Store)?;
-    let count = agent(&store)
+    let service = open_service(required_option(&options, "db")?)?;
+    let count = service
         .discover(&[PathBuf::from(required_option(&options, "root")?)])
-        .map_err(CliError::Agent)?;
+        .map_err(service_error)?;
     Ok(format!("discovered: {count}\n"))
 }
 
@@ -268,8 +259,8 @@ fn collect_command(arguments: &[String]) -> Result<String, CliError> {
 }
 fn sources_command(arguments: &[String]) -> Result<String, CliError> {
     let options = parse_options(arguments, &["db"])?;
-    let store = Store::open(required_option(&options, "db")?).map_err(CliError::Store)?;
-    let sources = store.list_discovered_sources().map_err(CliError::Store)?;
+    let service = open_service(required_option(&options, "db")?)?;
+    let sources = service.list_sources().map_err(service_error)?;
     if sources.is_empty() {
         return Ok("no discovered sources\n".to_owned());
     }
@@ -280,23 +271,23 @@ fn source_action(arguments: &[String], approve: bool) -> Result<String, CliError
         .first()
         .ok_or_else(|| CliError::Usage(usage().to_owned()))?;
     let opts = parse_options(&arguments[1..], &["db"])?;
-    let store = Store::open(required_option(&opts, "db")?).map_err(CliError::Store)?;
+    let service = open_service(required_option(&opts, "db")?)?;
     if approve {
-        let connection = agent(&store)
-            .approve(&schomburg_store::DiscoveredSourceId::new(id.clone()))
-            .map_err(CliError::Agent)?;
+        let connection = service
+            .connect(&schomburg_store::DiscoveredSourceId::new(id.clone()))
+            .map_err(service_error)?;
         Ok(format!("connected: {}\n", connection.as_str()))
     } else {
-        agent(&store)
+        service
             .decline(&schomburg_store::DiscoveredSourceId::new(id.clone()))
-            .map_err(CliError::Agent)?;
+            .map_err(service_error)?;
         Ok("declined\n".to_owned())
     }
 }
 fn connections_command(arguments: &[String]) -> Result<String, CliError> {
     let opts = parse_options(arguments, &["db"])?;
-    let store = Store::open(required_option(&opts, "db")?).map_err(CliError::Store)?;
-    let items = store.list_connections().map_err(CliError::Store)?;
+    let service = open_service(required_option(&opts, "db")?)?;
+    let items = service.list_connections().map_err(service_error)?;
     if items.is_empty() {
         return Ok("no connections\n".to_owned());
     }
@@ -317,10 +308,14 @@ fn connection_action(
         .first()
         .ok_or_else(|| CliError::Usage(usage().to_owned()))?;
     let opts = parse_options(&arguments[1..], &["db"])?;
-    let store = Store::open(required_option(&opts, "db")?).map_err(CliError::Store)?;
-    agent(&store)
-        .set_status(&schomburg_store::ConnectionId::new(id.clone()), status)
-        .map_err(CliError::Agent)?;
+    let service = open_service(required_option(&opts, "db")?)?;
+    let id = schomburg_store::ConnectionId::new(id.clone());
+    match status {
+        schomburg_store::ConnectionStatus::Paused => service.pause_connection(&id),
+        schomburg_store::ConnectionStatus::Enabled => service.resume_connection(&id),
+        schomburg_store::ConnectionStatus::Disconnected => service.disconnect_connection(&id),
+    }
+    .map_err(service_error)?;
     Ok(format!("{:?}\n", status).to_lowercase())
 }
 
@@ -610,7 +605,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  schomburg init --db <database-path>\n  schomburg discover --root <path> --db <database-path>\n  schomburg sources --db <database-path>\n  schomburg connect|decline <source-id> --db <database-path>\n  schomburg connections --db <database-path>\n  schomburg pause|resume|disconnect <connection-id> --db <database-path>\n  schomburg collect --db <database-path>\n  schomburg events --db <database-path> [--raw]\n  schomburg event <event-id> --db <database-path> [--raw]\n  schomburg import git --repo <repository-path> --db <database-path>\n"
+    "usage:\n  schomburg init --db <database-path>\n  schomburg discover --root <path> --db <database-path>\n  schomburg sources --db <database-path>\n  schomburg connect|decline <source-id> --db <database-path>\n  schomburg connections --db <database-path>\n  schomburg pause|resume|disconnect <connection-id> --db <database-path>\n  schomburg record-folder set --folder <path> --db <database-path>\n  schomburg schedule set --time HH:MM --days daily|weekdays|mon,tue,... --db <database-path>\n  schomburg schedule show --db <database-path>\n  schomburg monitoring on|off --db <database-path>\n  schomburg reconcile status --db <database-path>\n  schomburg update-record [--force] --db <database-path>\n  schomburg collect --db <database-path>\n  schomburg events --db <database-path> [--raw]\n  schomburg event <event-id> --db <database-path> [--raw]\n  schomburg import git --repo <repository-path> --db <database-path>\n"
 }
 
 /// Errors returned by the local proof CLI.
@@ -895,7 +890,7 @@ mod tests {
         execute(&arguments(&["init", "--db", db])).expect("init");
         assert!(matches!(
             execute(&arguments(&["update-record", "--db", db])),
-            Err(CliError::Agent(schomburg_agent::AgentError::NoRecordFolder))
+            Err(CliError::Presenter(message)) if message.contains("no Record Folder")
         ));
         execute(&arguments(&[
             "record-folder",

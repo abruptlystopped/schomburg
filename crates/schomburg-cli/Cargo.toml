@@ -12,6 +12,7 @@ schomburg-engine = { path = "../schomburg-engine" }
 schomburg-store = { path = "../schomburg-store" }
 schomburg-agent = { path = "../schomburg-agent" }
 schomburg-presenter = { path = "../schomburg-presenter" }
+schomburg-service = { path = "../schomburg-service" }
 time = { version = "0.3.53", default-features = false, features = ["formatting", "local-offset", "macros"] }
 
 [dev-dependencies]
