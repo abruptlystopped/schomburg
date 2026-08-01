@@ -142,9 +142,24 @@ Annotations, parse Git payloads, or duplicate engine or store logic. Shells use
 its structured status and result types; they must not parse CLI output.
 
 The service prevents overlapping Update Record operations within one service
-instance. Cross-process locking, platform-specific folder opening, and the
-long-running scheduler lifecycle remain deferred. macOS will be the first
-shell, not the owner of Schomburg; Windows will use this same boundary.
+instance. Cross-process locking and platform-specific folder opening remain
+deferred. macOS will be the first shell, not the owner of Schomburg; Windows
+will use this same boundary.
+
+The service also hosts the portable scheduler lifecycle. It waits on the
+persisted local schedule with a bounded condition-variable wait, wakes promptly
+when service configuration changes, and calls the same Update Record operation
+as a manual request. A paused configuration never starts automatic collection.
+On startup, one overdue eligible run is caught up if it has not succeeded; the
+scheduler does not replay multiple missed days. No automatic retry,
+cross-process lock, operating-system startup registration, or native shell is
+part of this lifecycle.
+
+Manual Update Record and scheduled Daily Reconciliation share their collection
+and record-generation machinery but preserve separate operational status. A
+manual update means “bring my record current” and never reconciles the day. A
+scheduled run records its eligible local date and succeeds even when it imports
+no evidence.
 
 Connectors also own factual presentation of the events they produce. The shared
 contract returns structured compact and detailed presentation data, rather than

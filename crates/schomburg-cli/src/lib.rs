@@ -47,6 +47,7 @@ pub fn execute(arguments: &[String]) -> Result<String, CliError> {
         Some("schedule") => schedule_command(&arguments[1..]),
         Some("monitoring") => monitoring_command(&arguments[1..]),
         Some("reconcile") => reconcile_status_command(&arguments[1..]),
+        Some("scheduler") => scheduler_command(&arguments[1..]),
         Some("update-record") => update_record_command(&arguments[1..]),
         _ => Err(CliError::Usage(usage().to_owned())),
     }
@@ -82,7 +83,7 @@ fn update_record_command(arguments: &[String]) -> Result<String, CliError> {
     let state = service
         .status()
         .map_err(|e| CliError::Presenter(e.to_string()))?
-        .configuration
+        .manual_update
         .state;
     Ok(format!(
         "imported: {}\nduplicates: {}\nrejected: {}\nfailed: {}\naffected dates: {}\nfiles created: {}\nfiles updated: {}\nfiles unchanged: {}\nfinal reconciliation status: {:?}\n",
@@ -145,6 +146,60 @@ fn reconcile_status_command(arguments: &[String]) -> Result<String, CliError> {
         return Err(CliError::Usage(usage().to_owned()));
     }
     show_config(&arguments[1..])
+}
+
+fn scheduler_command(arguments: &[String]) -> Result<String, CliError> {
+    match arguments.first().map(String::as_str) {
+        Some("status") => {
+            let options = parse_options(&arguments[1..], &["db"])?;
+            let service = open_service(required_option(&options, "db")?)?;
+            let status = service.scheduler_status().map_err(service_error)?;
+            Ok(format!(
+                "scheduler: {:?}\nmonitoring: {:?}\nnext run: {}\nlast attempt: {}\nlast success: {}\nlast error: {}\nrecord folder: {}\nconnected sources: {}\nupdate running: {}\n",
+                status.lifecycle,
+                status.monitoring,
+                status
+                    .next_run
+                    .map(format_local_time)
+                    .transpose()?
+                    .unwrap_or_else(|| "none".to_owned()),
+                status
+                    .last_attempt
+                    .map(format_local_time)
+                    .transpose()?
+                    .unwrap_or_else(|| "never".to_owned()),
+                status
+                    .last_success
+                    .map(format_local_time)
+                    .transpose()?
+                    .unwrap_or_else(|| "never".to_owned()),
+                status.last_error.unwrap_or_else(|| "none".to_owned()),
+                status
+                    .record_folder
+                    .unwrap_or_else(|| "not configured".to_owned()),
+                status.connected_sources,
+                status.update_running,
+            ))
+        }
+        Some("start") => {
+            let options = parse_options(&arguments[1..], &["db"])?;
+            let service = open_service(required_option(&options, "db")?)?;
+            service.start_scheduler().map_err(service_error)?;
+            let (sender, receiver) = std::sync::mpsc::channel();
+            ctrlc::set_handler(move || {
+                let _ = sender.send(());
+            })
+            .map_err(|error| {
+                CliError::Presenter(format!("cannot install shutdown handler: {error}"))
+            })?;
+            receiver.recv().map_err(|error| {
+                CliError::Presenter(format!("scheduler shutdown interrupted: {error}"))
+            })?;
+            service.stop_scheduler().map_err(service_error)?;
+            Ok("scheduler stopped\n".to_owned())
+        }
+        _ => Err(CliError::Usage(usage().to_owned())),
+    }
 }
 fn show_config(arguments: &[String]) -> Result<String, CliError> {
     let o = parse_options(arguments, &["db"])?;
@@ -605,7 +660,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  schomburg init --db <database-path>\n  schomburg discover --root <path> --db <database-path>\n  schomburg sources --db <database-path>\n  schomburg connect|decline <source-id> --db <database-path>\n  schomburg connections --db <database-path>\n  schomburg pause|resume|disconnect <connection-id> --db <database-path>\n  schomburg record-folder set --folder <path> --db <database-path>\n  schomburg schedule set --time HH:MM --days daily|weekdays|mon,tue,... --db <database-path>\n  schomburg schedule show --db <database-path>\n  schomburg monitoring on|off --db <database-path>\n  schomburg reconcile status --db <database-path>\n  schomburg update-record [--force] --db <database-path>\n  schomburg collect --db <database-path>\n  schomburg events --db <database-path> [--raw]\n  schomburg event <event-id> --db <database-path> [--raw]\n  schomburg import git --repo <repository-path> --db <database-path>\n"
+    "usage:\n  schomburg init --db <database-path>\n  schomburg discover --root <path> --db <database-path>\n  schomburg sources --db <database-path>\n  schomburg connect|decline <source-id> --db <database-path>\n  schomburg connections --db <database-path>\n  schomburg pause|resume|disconnect <connection-id> --db <database-path>\n  schomburg record-folder set --folder <path> --db <database-path>\n  schomburg schedule set --time HH:MM --days daily|weekdays|mon,tue,... --db <database-path>\n  schomburg schedule show --db <database-path>\n  schomburg monitoring on|off --db <database-path>\n  schomburg reconcile status --db <database-path>\n  schomburg scheduler start|status --db <database-path>\n  schomburg update-record [--force] --db <database-path>\n  schomburg collect --db <database-path>\n  schomburg events --db <database-path> [--raw]\n  schomburg event <event-id> --db <database-path> [--raw]\n  schomburg import git --repo <repository-path> --db <database-path>\n"
 }
 
 /// Errors returned by the local proof CLI.

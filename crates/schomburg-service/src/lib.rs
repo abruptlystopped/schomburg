@@ -1,25 +1,64 @@
 //! Portable shell-facing facade over Schomburg's existing components.
 
-use schomburg_agent::{Agent, AgentError, UpdateRecordResult, next_eligible_run};
+use schomburg_agent::{
+    Agent, AgentError, UpdateRecordResult, UpdateRecordRunKind, next_eligible_run,
+};
 use schomburg_connector::{ConnectorExtension, PresentationRegistry};
 use schomburg_connector_git::{GitConnectorExtension, GitPresenter};
-use schomburg_presenter::Presenter;
+use schomburg_presenter::{Presenter, record_date_for};
 use schomburg_store::{
     ConnectionId, ConnectionRecord, ConnectionStatus, DiscoveredSource, DiscoveredSourceId,
-    GlobalMonitoringState, ReconciliationConfiguration, Store,
+    GlobalMonitoringState, ManualUpdateStatus, ReconciliationConfiguration,
+    ScheduledReconciliationStatus, Store,
 };
 use std::{
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Condvar, Mutex},
+    thread::{self, JoinHandle},
+    time::{Duration, SystemTime},
 };
 
 pub struct SchomburgService {
     store: Store,
-    updating: Mutex<bool>,
+    database_path: PathBuf,
+    updating: Arc<Mutex<bool>>,
+    scheduler: Arc<(Mutex<SchedulerControl>, Condvar)>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SchedulerLifecycle {
+    Stopped,
+    Paused,
+    Waiting,
+    Updating,
+    Failed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SchedulerStatus {
+    pub running: bool,
+    pub lifecycle: SchedulerLifecycle,
+    pub monitoring: GlobalMonitoringState,
+    pub next_run: Option<SystemTime>,
+    pub last_attempt: Option<SystemTime>,
+    pub last_success: Option<SystemTime>,
+    pub last_error: Option<String>,
+    pub record_folder: Option<String>,
+    pub connected_sources: usize,
+    pub update_running: bool,
+}
+
+struct SchedulerControl {
+    running: bool,
+    stop_requested: bool,
+    lifecycle: SchedulerLifecycle,
+    handle: Option<JoinHandle<()>>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ServiceStatus {
     pub configuration: ReconciliationConfiguration,
+    pub manual_update: ManualUpdateStatus,
+    pub scheduled_reconciliation: ScheduledReconciliationStatus,
     pub connected_sources: usize,
     pub awaiting_consent: usize,
     pub update_running: bool,
@@ -29,6 +68,8 @@ pub enum ServiceError {
     Database(String),
     Agent(String),
     UpdateAlreadyRunning,
+    SchedulerAlreadyRunning,
+    SchedulerNotRunning,
     UnknownSource,
     UnknownConnection,
     PlatformUnavailable,
@@ -39,6 +80,8 @@ impl std::fmt::Display for ServiceError {
             Self::Database(v) => write!(f, "database error: {v}"),
             Self::Agent(v) => write!(f, "service operation failed: {v}"),
             Self::UpdateAlreadyRunning => write!(f, "Update Record already running"),
+            Self::SchedulerAlreadyRunning => write!(f, "scheduler already running"),
+            Self::SchedulerNotRunning => write!(f, "scheduler is not running"),
             Self::UnknownSource => write!(f, "unknown source"),
             Self::UnknownConnection => write!(f, "unknown connection"),
             Self::PlatformUnavailable => write!(f, "platform operation unavailable"),
@@ -48,9 +91,31 @@ impl std::fmt::Display for ServiceError {
 impl std::error::Error for ServiceError {}
 impl SchomburgService {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, ServiceError> {
+        Self::open_with_scheduler(
+            path.as_ref(),
+            Arc::new((
+                Mutex::new(SchedulerControl {
+                    running: false,
+                    stop_requested: false,
+                    lifecycle: SchedulerLifecycle::Stopped,
+                    handle: None,
+                }),
+                Condvar::new(),
+            )),
+            Arc::new(Mutex::new(false)),
+        )
+    }
+
+    fn open_with_scheduler(
+        path: &Path,
+        scheduler: Arc<(Mutex<SchedulerControl>, Condvar)>,
+        updating: Arc<Mutex<bool>>,
+    ) -> Result<Self, ServiceError> {
         Ok(Self {
             store: Store::open(path).map_err(|e| ServiceError::Database(e.to_string()))?,
-            updating: Mutex::new(false),
+            database_path: path.to_path_buf(),
+            updating,
+            scheduler,
         })
     }
     fn agent(&self) -> Agent<'_> {
@@ -80,6 +145,14 @@ impl SchomburgService {
                 .store
                 .reconciliation_configuration()
                 .map_err(|e| ServiceError::Database(e.to_string()))?,
+            manual_update: self
+                .store
+                .manual_update_status()
+                .map_err(|e| ServiceError::Database(e.to_string()))?,
+            scheduled_reconciliation: self
+                .store
+                .scheduled_reconciliation_status()
+                .map_err(|e| ServiceError::Database(e.to_string()))?,
             connected_sources: connections
                 .iter()
                 .filter(|c| c.status == ConnectionStatus::Enabled)
@@ -92,6 +165,75 @@ impl SchomburgService {
                 .updating
                 .lock()
                 .map_err(|_| ServiceError::UpdateAlreadyRunning)?,
+        })
+    }
+
+    /// Starts one portable scheduler loop for this service instance.
+    pub fn start_scheduler(&self) -> Result<(), ServiceError> {
+        let (lock, changed) = &*self.scheduler;
+        let mut control = lock
+            .lock()
+            .map_err(|_| ServiceError::SchedulerAlreadyRunning)?;
+        if control.running {
+            return Err(ServiceError::SchedulerAlreadyRunning);
+        }
+        control.running = true;
+        control.stop_requested = false;
+        control.lifecycle = SchedulerLifecycle::Waiting;
+        let database_path = self.database_path.clone();
+        let scheduler = Arc::clone(&self.scheduler);
+        let updating = Arc::clone(&self.updating);
+        control.handle = Some(thread::spawn(move || {
+            let Ok(service) = SchomburgService::open_with_scheduler(
+                &database_path,
+                Arc::clone(&scheduler),
+                updating,
+            ) else {
+                set_scheduler_lifecycle(&scheduler, SchedulerLifecycle::Failed);
+                return;
+            };
+            scheduler_loop(&service, &scheduler);
+        }));
+        changed.notify_all();
+        Ok(())
+    }
+
+    /// Requests scheduler shutdown and waits for the local loop to finish.
+    pub fn stop_scheduler(&self) -> Result<(), ServiceError> {
+        let handle = {
+            let (lock, changed) = &*self.scheduler;
+            let mut control = lock.lock().map_err(|_| ServiceError::SchedulerNotRunning)?;
+            if !control.running {
+                return Err(ServiceError::SchedulerNotRunning);
+            }
+            control.stop_requested = true;
+            changed.notify_all();
+            control.handle.take()
+        };
+        if let Some(handle) = handle {
+            let _ = handle.join();
+        }
+        Ok(())
+    }
+
+    pub fn scheduler_status(&self) -> Result<SchedulerStatus, ServiceError> {
+        let status = self.status()?;
+        let (lock, _) = &*self.scheduler;
+        let control = lock.lock().map_err(|_| ServiceError::SchedulerNotRunning)?;
+        Ok(SchedulerStatus {
+            running: control.running,
+            lifecycle: control.lifecycle,
+            monitoring: status.configuration.monitoring,
+            next_run: status
+                .scheduled_reconciliation
+                .next_scheduled_run
+                .or(status.configuration.next_run),
+            last_attempt: status.scheduled_reconciliation.last_attempt,
+            last_success: status.scheduled_reconciliation.last_success,
+            last_error: status.scheduled_reconciliation.last_error,
+            record_folder: status.configuration.record_folder,
+            connected_sources: status.connected_sources,
+            update_running: status.update_running,
         })
     }
     pub fn update_record(&self, force: bool) -> Result<UpdateRecordResult, ServiceError> {
@@ -107,6 +249,30 @@ impl SchomburgService {
             let presenter = self.presenter()?;
             self.agent()
                 .update_record_once(&presenter, force)
+                .map_err(map_agent)
+        })();
+        *guard = false;
+        result
+    }
+    fn scheduled_update(&self, eligible_date: String) -> Result<UpdateRecordResult, ServiceError> {
+        let mut guard = self
+            .updating
+            .lock()
+            .map_err(|_| ServiceError::UpdateAlreadyRunning)?;
+        if *guard {
+            return Err(ServiceError::UpdateAlreadyRunning);
+        }
+        *guard = true;
+        let result = (|| {
+            let presenter = self.presenter()?;
+            self.agent()
+                .execute_update_record_once(
+                    &presenter,
+                    false,
+                    UpdateRecordRunKind::ScheduledDailyReconciliation {
+                        eligible_local_date: eligible_date,
+                    },
+                )
                 .map_err(map_agent)
         })();
         *guard = false;
@@ -163,7 +329,9 @@ impl SchomburgService {
         c.next_run = next_eligible_run(&c, std::time::SystemTime::now()).map_err(map_agent)?;
         self.store
             .save_reconciliation_configuration(&c)
-            .map_err(|e| ServiceError::Database(e.to_string()))
+            .map_err(|e| ServiceError::Database(e.to_string()))?;
+        self.notify_scheduler();
+        Ok(())
     }
     pub fn set_record_folder(&self, path: impl Into<String>) -> Result<(), ServiceError> {
         let mut c = self
@@ -173,7 +341,9 @@ impl SchomburgService {
         c.record_folder = Some(path.into());
         self.store
             .save_reconciliation_configuration(&c)
-            .map_err(|e| ServiceError::Database(e.to_string()))
+            .map_err(|e| ServiceError::Database(e.to_string()))?;
+        self.notify_scheduler();
+        Ok(())
     }
     pub fn set_schedule(
         &self,
@@ -183,12 +353,154 @@ impl SchomburgService {
             next_eligible_run(&schedule, std::time::SystemTime::now()).map_err(map_agent)?;
         self.store
             .save_reconciliation_configuration(&schedule)
-            .map_err(|e| ServiceError::Database(e.to_string()))
+            .map_err(|e| ServiceError::Database(e.to_string()))?;
+        self.notify_scheduler();
+        Ok(())
     }
     pub fn get_schedule(&self) -> Result<ReconciliationConfiguration, ServiceError> {
         self.store
             .reconciliation_configuration()
             .map_err(|e| ServiceError::Database(e.to_string()))
+    }
+
+    fn notify_scheduler(&self) {
+        self.scheduler.1.notify_all();
+    }
+}
+
+fn set_scheduler_lifecycle(
+    scheduler: &Arc<(Mutex<SchedulerControl>, Condvar)>,
+    lifecycle: SchedulerLifecycle,
+) {
+    let (lock, changed) = &**scheduler;
+    if let Ok(mut control) = lock.lock() {
+        control.lifecycle = lifecycle;
+        if lifecycle == SchedulerLifecycle::Stopped {
+            control.running = false;
+            control.handle = None;
+        }
+        changed.notify_all();
+    }
+}
+
+fn scheduler_loop(service: &SchomburgService, scheduler: &Arc<(Mutex<SchedulerControl>, Condvar)>) {
+    const MAXIMUM_WAIT: Duration = Duration::from_secs(60);
+    loop {
+        let configuration = match service.get_schedule() {
+            Ok(configuration) => configuration,
+            Err(_) => {
+                set_scheduler_lifecycle(scheduler, SchedulerLifecycle::Failed);
+                wait_for_change_or_stop(scheduler, MAXIMUM_WAIT);
+                continue;
+            }
+        };
+        if configuration.monitoring == GlobalMonitoringState::Paused {
+            set_scheduler_lifecycle(scheduler, SchedulerLifecycle::Paused);
+            if wait_for_change_or_stop(scheduler, MAXIMUM_WAIT) {
+                break;
+            }
+            continue;
+        }
+
+        let now = SystemTime::now();
+        let scheduled_status = match service.store.scheduled_reconciliation_status() {
+            Ok(value) => value,
+            Err(_) => break,
+        };
+        let due_run = scheduled_status
+            .next_scheduled_run
+            .or(configuration.next_run);
+        let missed_run = due_run
+            .filter(|scheduled| *scheduled <= now)
+            .filter(|scheduled| {
+                scheduled_status
+                    .last_success
+                    .is_none_or(|success| success < *scheduled)
+            });
+        if let Some(missed_run) = missed_run {
+            set_scheduler_lifecycle(scheduler, SchedulerLifecycle::Updating);
+            let date = record_date_for(missed_run)
+                .expect("valid local date")
+                .as_str()
+                .to_owned();
+            let _ = service.scheduled_update(date);
+            persist_next_run(service);
+            continue;
+        }
+        let next = match next_eligible_run(&configuration, now) {
+            Ok(Some(next)) => next,
+            Ok(None) => {
+                set_scheduler_lifecycle(scheduler, SchedulerLifecycle::Paused);
+                if wait_for_change_or_stop(scheduler, MAXIMUM_WAIT) {
+                    break;
+                }
+                continue;
+            }
+            Err(_) => {
+                set_scheduler_lifecycle(scheduler, SchedulerLifecycle::Failed);
+                if wait_for_change_or_stop(scheduler, MAXIMUM_WAIT) {
+                    break;
+                }
+                continue;
+            }
+        };
+        if configuration.next_run != Some(next) {
+            let mut updated = configuration;
+            updated.next_run = Some(next);
+            let _ = service.set_schedule(updated);
+        }
+        set_scheduler_lifecycle(scheduler, SchedulerLifecycle::Waiting);
+        let duration = next
+            .duration_since(now)
+            .unwrap_or_default()
+            .min(MAXIMUM_WAIT);
+        if wait_for_change_or_stop(scheduler, duration) {
+            break;
+        }
+        if SystemTime::now() >= next {
+            set_scheduler_lifecycle(scheduler, SchedulerLifecycle::Updating);
+            let date = record_date_for(next)
+                .expect("valid local date")
+                .as_str()
+                .to_owned();
+            let _ = service.scheduled_update(date);
+            persist_next_run(service);
+        }
+    }
+    set_scheduler_lifecycle(scheduler, SchedulerLifecycle::Stopped);
+}
+
+fn persist_next_run(service: &SchomburgService) {
+    if let Ok(mut configuration) = service.get_schedule()
+        && let Ok(next) = next_eligible_run(&configuration, SystemTime::now())
+    {
+        configuration.next_run = next;
+        let _ = service.set_schedule(configuration);
+        if let Ok(mut scheduled) = service.store.scheduled_reconciliation_status() {
+            scheduled.next_scheduled_run = next;
+            let _ = service
+                .store
+                .save_scheduled_reconciliation_status(&scheduled);
+        }
+    }
+}
+
+/// Returns true when shutdown was requested.
+fn wait_for_change_or_stop(
+    scheduler: &Arc<(Mutex<SchedulerControl>, Condvar)>,
+    duration: Duration,
+) -> bool {
+    let (lock, changed) = &**scheduler;
+    let control = match lock.lock() {
+        Ok(control) => control,
+        Err(_) => return true,
+    };
+    if control.stop_requested {
+        return true;
+    }
+    match changed.wait_timeout(control, duration) {
+        Ok((control, _)) => control.stop_requested,
+        Err(_) => true,
     }
 }
 fn map_agent(error: AgentError) -> ServiceError {
@@ -212,6 +524,7 @@ mod tests {
     use std::{
         fs,
         sync::atomic::{AtomicUsize, Ordering},
+        time::{Duration, Instant},
     };
 
     static SERIAL: AtomicUsize = AtomicUsize::new(0);
@@ -329,6 +642,25 @@ mod tests {
     }
 
     #[test]
+    fn manual_update_writes_only_manual_operational_status() {
+        let directory = TemporaryDirectory::new("manual-status");
+        let service = SchomburgService::open(database(&directory)).expect("open");
+        service
+            .set_record_folder(directory.0.join("records").display().to_string())
+            .expect("folder");
+        service.update_record(true).expect("manual update");
+        let status = service.status().expect("status");
+        assert!(status.manual_update.last_success.is_some());
+        assert!(status.scheduled_reconciliation.last_success.is_none());
+        assert!(
+            status
+                .scheduled_reconciliation
+                .last_reconciled_local_date
+                .is_none()
+        );
+    }
+
+    #[test]
     fn discovery_connection_actions_and_unknown_ids_use_service_boundary() {
         let directory = TemporaryDirectory::new("discovery");
         let root = directory.0.join("roots");
@@ -375,5 +707,81 @@ mod tests {
         ));
         *service.updating.lock().expect("guard") = false;
         assert!(!service.status().expect("status").update_running);
+    }
+
+    fn wait_for_lifecycle(service: &SchomburgService, expected: SchedulerLifecycle) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < deadline {
+            if service
+                .scheduler_status()
+                .expect("scheduler status")
+                .lifecycle
+                == expected
+            {
+                return;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        panic!("scheduler did not reach {expected:?}");
+    }
+
+    #[test]
+    fn scheduler_pauses_stops_and_rejects_a_second_start() {
+        let directory = TemporaryDirectory::new("scheduler-paused");
+        let service = SchomburgService::open(database(&directory)).expect("open");
+        service.start_scheduler().expect("start");
+        wait_for_lifecycle(&service, SchedulerLifecycle::Paused);
+        assert!(matches!(
+            service.start_scheduler(),
+            Err(ServiceError::SchedulerAlreadyRunning)
+        ));
+        service.stop_scheduler().expect("stop");
+        assert_eq!(
+            service.scheduler_status().expect("status").lifecycle,
+            SchedulerLifecycle::Stopped
+        );
+        assert!(matches!(
+            service.stop_scheduler(),
+            Err(ServiceError::SchedulerNotRunning)
+        ));
+    }
+
+    #[test]
+    fn scheduler_catches_up_one_due_run_with_the_existing_update_operation() {
+        let directory = TemporaryDirectory::new("scheduler-catch-up");
+        let service = SchomburgService::open(database(&directory)).expect("open");
+        service
+            .set_record_folder(directory.0.join("records").display().to_string())
+            .expect("folder");
+        service.set_monitoring_enabled(true).expect("enable");
+        let mut configuration = service.get_schedule().expect("configuration");
+        configuration.next_run = Some(SystemTime::now() - Duration::from_secs(1));
+        service
+            .store
+            .save_reconciliation_configuration(&configuration)
+            .expect("due run");
+
+        service.start_scheduler().expect("start");
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < deadline {
+            if service
+                .status()
+                .expect("status")
+                .configuration
+                .last_success
+                .is_some()
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        let status = service.status().expect("status");
+        assert!(status.scheduled_reconciliation.last_success.is_some());
+        assert_eq!(
+            status.scheduled_reconciliation.state,
+            schomburg_store::ReconciliationState::Succeeded
+        );
+        assert!(status.manual_update.last_success.is_none());
+        service.stop_scheduler().expect("stop");
     }
 }

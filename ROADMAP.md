@@ -39,7 +39,9 @@ This is a planning scaffold, not a commitment or schedule.
 
 ### Phase 2.3C — Scheduler lifecycle
 
-- [ ] Implement portable long-running lifecycle, cancellation, retry, and concurrency policy.
+- [x] Implement portable long-running lifecycle, bounded waiting, cancellation,
+  and one missed-run catch-up policy.
+- [ ] Add automatic retry and cross-process coordination (deferred).
 
 Native macOS menu-bar and Windows tray shells remain later work.
 

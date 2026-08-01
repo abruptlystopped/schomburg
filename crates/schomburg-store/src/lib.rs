@@ -410,6 +410,105 @@ impl Store {
         self.connection.execute("UPDATE reconciliation_configuration SET monitoring=?1,record_folder=?2,schedule_kind=?3,schedule_days=?4,local_hour=?5,local_minute=?6,last_attempt=?7,last_success=?8,next_run=?9,last_error=?10,imported=?11,duplicates=?12,rejected=?13,failed=?14,state=?15 WHERE id=1",params![if value.monitoring==GlobalMonitoringState::Enabled{"enabled"}else{"paused"},value.record_folder,kind,days,value.time.hour,value.time.minute,value.last_attempt.map(encode_timestamp),value.last_success.map(encode_timestamp),value.next_run.map(encode_timestamp),value.last_error,value.counts.imported as i64,value.counts.duplicates as i64,value.counts.rejected as i64,value.counts.failed as i64,match value.state{ReconciliationState::Idle=>"idle",ReconciliationState::Running=>"running",ReconciliationState::Succeeded=>"succeeded",ReconciliationState::Failed=>"failed",ReconciliationState::Paused=>"paused"}]).map_err(StoreError::database)?;
         Ok(())
     }
+    pub fn manual_update_status(&self) -> Result<ManualUpdateStatus, StoreError> {
+        self.read_manual_status("manual_update_status")
+    }
+    pub fn save_manual_update_status(&self, value: &ManualUpdateStatus) -> Result<(), StoreError> {
+        self.write_manual_status("manual_update_status", value)
+    }
+    pub fn scheduled_reconciliation_status(
+        &self,
+    ) -> Result<ScheduledReconciliationStatus, StoreError> {
+        self.connection.query_row("SELECT last_attempt,last_success,last_error,imported,duplicates,rejected,failed,state,last_reconciled_local_date,next_scheduled_run FROM scheduled_reconciliation_status WHERE id=1",[],|r|Ok((r.get::<_,Option<Vec<u8>>>(0)?,r.get::<_,Option<Vec<u8>>>(1)?,r.get(2)?,r.get::<_,i64>(3)?,r.get::<_,i64>(4)?,r.get::<_,i64>(5)?,r.get::<_,i64>(6)?,r.get::<_,String>(7)?,r.get(8)?,r.get::<_,Option<Vec<u8>>>(9)?))).map_err(StoreError::database).and_then(|(a,s,e,i,d,r,f,state,date,next)|Ok(ScheduledReconciliationStatus{last_attempt:a.map(|v|decode_timestamp(&v,"scheduled attempt")).transpose()?,last_success:s.map(|v|decode_timestamp(&v,"scheduled success")).transpose()?,last_error:e,counts:ReconciliationCounts{imported:i as u64,duplicates:d as u64,rejected:r as u64,failed:f as u64},state:decode_state(&state),last_reconciled_local_date:date,next_scheduled_run:next.map(|v|decode_timestamp(&v,"next scheduled run")).transpose()?}))
+    }
+    pub fn save_scheduled_reconciliation_status(
+        &self,
+        value: &ScheduledReconciliationStatus,
+    ) -> Result<(), StoreError> {
+        self.connection.execute("UPDATE scheduled_reconciliation_status SET last_attempt=?1,last_success=?2,last_error=?3,imported=?4,duplicates=?5,rejected=?6,failed=?7,state=?8,last_reconciled_local_date=?9,next_scheduled_run=?10 WHERE id=1",params![value.last_attempt.map(encode_timestamp),value.last_success.map(encode_timestamp),value.last_error,value.counts.imported as i64,value.counts.duplicates as i64,value.counts.rejected as i64,value.counts.failed as i64,encode_state(value.state),value.last_reconciled_local_date,value.next_scheduled_run.map(encode_timestamp)]).map_err(StoreError::database)?;
+        Ok(())
+    }
+    fn read_manual_status(&self, table: &str) -> Result<ManualUpdateStatus, StoreError> {
+        let sql = format!(
+            "SELECT last_attempt,last_success,last_error,imported,duplicates,rejected,failed,state FROM {table} WHERE id=1"
+        );
+        self.connection
+            .query_row(&sql, [], |r| {
+                Ok((
+                    r.get::<_, Option<Vec<u8>>>(0)?,
+                    r.get::<_, Option<Vec<u8>>>(1)?,
+                    r.get(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, i64>(6)?,
+                    r.get::<_, String>(7)?,
+                ))
+            })
+            .map_err(StoreError::database)
+            .and_then(|(a, s, e, i, d, r, f, state)| {
+                Ok(ManualUpdateStatus {
+                    last_attempt: a
+                        .map(|v| decode_timestamp(&v, "manual attempt"))
+                        .transpose()?,
+                    last_success: s
+                        .map(|v| decode_timestamp(&v, "manual success"))
+                        .transpose()?,
+                    last_error: e,
+                    counts: ReconciliationCounts {
+                        imported: i as u64,
+                        duplicates: d as u64,
+                        rejected: r as u64,
+                        failed: f as u64,
+                    },
+                    state: decode_state(&state),
+                })
+            })
+    }
+    fn write_manual_status(
+        &self,
+        table: &str,
+        value: &ManualUpdateStatus,
+    ) -> Result<(), StoreError> {
+        let sql = format!(
+            "UPDATE {table} SET last_attempt=?1,last_success=?2,last_error=?3,imported=?4,duplicates=?5,rejected=?6,failed=?7,state=?8 WHERE id=1"
+        );
+        self.connection
+            .execute(
+                &sql,
+                params![
+                    value.last_attempt.map(encode_timestamp),
+                    value.last_success.map(encode_timestamp),
+                    value.last_error,
+                    value.counts.imported as i64,
+                    value.counts.duplicates as i64,
+                    value.counts.rejected as i64,
+                    value.counts.failed as i64,
+                    encode_state(value.state)
+                ],
+            )
+            .map_err(StoreError::database)?;
+        Ok(())
+    }
+}
+
+fn encode_state(value: ReconciliationState) -> &'static str {
+    match value {
+        ReconciliationState::Idle => "idle",
+        ReconciliationState::Running => "running",
+        ReconciliationState::Succeeded => "succeeded",
+        ReconciliationState::Failed => "failed",
+        ReconciliationState::Paused => "paused",
+    }
+}
+fn decode_state(value: &str) -> ReconciliationState {
+    match value {
+        "idle" => ReconciliationState::Idle,
+        "running" => ReconciliationState::Running,
+        "succeeded" => ReconciliationState::Succeeded,
+        "failed" => ReconciliationState::Failed,
+        _ => ReconciliationState::Paused,
+    }
 }
 
 struct StoredEvent {

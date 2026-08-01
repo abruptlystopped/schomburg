@@ -14,6 +14,7 @@ schomburg-agent = { path = "../schomburg-agent" }
 schomburg-presenter = { path = "../schomburg-presenter" }
 schomburg-service = { path = "../schomburg-service" }
 time = { version = "0.3.53", default-features = false, features = ["formatting", "local-offset", "macros"] }
+ctrlc = "3.4"
 
 [dev-dependencies]
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }

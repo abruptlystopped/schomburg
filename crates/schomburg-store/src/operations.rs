@@ -81,6 +81,24 @@ pub struct ReconciliationConfiguration {
     pub counts: ReconciliationCounts,
     pub state: ReconciliationState,
 }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManualUpdateStatus {
+    pub last_attempt: Option<SystemTime>,
+    pub last_success: Option<SystemTime>,
+    pub last_error: Option<String>,
+    pub counts: ReconciliationCounts,
+    pub state: ReconciliationState,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScheduledReconciliationStatus {
+    pub last_attempt: Option<SystemTime>,
+    pub last_success: Option<SystemTime>,
+    pub last_error: Option<String>,
+    pub counts: ReconciliationCounts,
+    pub state: ReconciliationState,
+    pub last_reconciled_local_date: Option<String>,
+    pub next_scheduled_run: Option<SystemTime>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscoveredSource {

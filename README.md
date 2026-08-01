@@ -17,4 +17,4 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The next proposed tag is `v0.1.0-alpha.1`; it has not been created.
 
-Phase 2.4 adds `schomburg-service`, the portable control API used by the CLI and intended for future macOS and Windows shells. It coordinates existing components but does not own evidence. Update Record is available through this API; scheduler lifecycle and cross-process locking remain deferred. See [the Phase 2 guide](docs/phase-2/README.md) and [service API](docs/phase-2/SERVICE_API.md).
+Phase 2.3C adds a portable foreground scheduler. It waits efficiently for the persisted local schedule and invokes the same Update Record operation as the manual command. It has no installer, startup-at-login integration, automatic retry, or cross-process lock. See [the Phase 2 guide](docs/phase-2/README.md), [scheduler lifecycle](docs/phase-2/SCHEDULER_LIFECYCLE.md), and [service API](docs/phase-2/SERVICE_API.md).

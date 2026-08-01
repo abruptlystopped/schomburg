@@ -10,5 +10,9 @@ rather than parse terminal output. macOS is the first planned shell, not the
 owner of Schomburg, and Windows will use the same boundary.
 
 Update Record is protected from overlapping calls within one service instance.
-Platform-specific folder opening, cross-process locking, and the long-running
-scheduler lifecycle remain deferred.
+Platform-specific folder opening and cross-process locking remain deferred.
+
+Phase 2.3C adds a portable scheduler lifecycle. It waits for the configured
+local time and invokes the same Update Record operation as a manual action.
+Monitoring paused prevents automatic runs. Native shells will host and control
+this lifecycle; they do not own it. See [scheduler lifecycle](SCHEDULER_LIFECYCLE.md).

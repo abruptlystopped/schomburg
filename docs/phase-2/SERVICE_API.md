@@ -13,7 +13,12 @@ not own Events or Annotations, interpret evidence, or parse source-specific Git
 payloads. Native shells must use these structured values rather than parsing
 CLI output.
 
+Service status exposes Manual Update and Scheduled Reconciliation status
+independently. Shells must not infer daily reconciliation from a manual update.
+
 The service prevents two Update Record operations from overlapping within one
 service instance. It intentionally does not yet provide cross-process locking,
-a scheduler lifecycle, platform-native UI, or platform-specific folder opening.
-Those remain outside the portable service boundary.
+a platform-native UI, or platform-specific folder opening. The portable
+scheduler is available through structured start, stop, and status operations;
+it remains hosted by a shell or development CLI. Cross-process locking remains
+outside this boundary.

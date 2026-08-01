@@ -8,7 +8,7 @@ use schomburg_store::{
 };
 use schomburg_store::{
     GlobalMonitoringState, LocalReconciliationTime, ReconciliationConfiguration,
-    ReconciliationSchedule,
+    ReconciliationCounts, ReconciliationSchedule, ReconciliationState,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -19,6 +19,12 @@ use std::{
 use time::{OffsetDateTime, UtcOffset, Weekday};
 
 /// Calculates the next local eligible schedule occurrence after `now`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UpdateRecordRunKind {
+    ManualUpdate,
+    ScheduledDailyReconciliation { eligible_local_date: String },
+}
+
 pub fn next_eligible_run(
     configuration: &ReconciliationConfiguration,
     now: SystemTime,
@@ -218,7 +224,16 @@ impl<'a> Agent<'a> {
         presenter: &Presenter,
         force: bool,
     ) -> Result<UpdateRecordResult, AgentError> {
-        let mut config = self
+        self.execute_update_record_once(presenter, force, UpdateRecordRunKind::ManualUpdate)
+    }
+
+    pub fn execute_update_record_once(
+        &self,
+        presenter: &Presenter,
+        force: bool,
+        kind: UpdateRecordRunKind,
+    ) -> Result<UpdateRecordResult, AgentError> {
+        let config = self
             .store
             .reconciliation_configuration()
             .map_err(AgentError::Store)?;
@@ -228,12 +243,7 @@ impl<'a> Agent<'a> {
         if config.monitoring == GlobalMonitoringState::Paused && !force {
             return Err(AgentError::MonitoringPaused);
         }
-        config.last_attempt = Some(SystemTime::now());
-        config.state = schomburg_store::ReconciliationState::Running;
-        config.last_error = None;
-        self.store
-            .save_reconciliation_configuration(&config)
-            .map_err(AgentError::Store)?;
+        self.begin_run(&kind)?;
         let before: BTreeSet<String> = self
             .store
             .list_events()
@@ -244,11 +254,7 @@ impl<'a> Agent<'a> {
         let collection = match self.collect_once() {
             Ok(value) => value,
             Err(error) => {
-                config.state = schomburg_store::ReconciliationState::Failed;
-                config.last_error = Some(error.to_string());
-                self.store
-                    .save_reconciliation_configuration(&config)
-                    .map_err(AgentError::Store)?;
+                self.fail_run(&kind, error.to_string())?;
                 return Err(error);
             }
         };
@@ -264,11 +270,7 @@ impl<'a> Agent<'a> {
                     Ok(value) => value,
                     Err(error) => {
                         let error = AgentError::Presenter(error.to_string());
-                        config.state = schomburg_store::ReconciliationState::Failed;
-                        config.last_error = Some(error.to_string());
-                        self.store
-                            .save_reconciliation_configuration(&config)
-                            .map_err(AgentError::Store)?;
+                        self.fail_run(&kind, error.to_string())?;
                         return Err(error);
                     }
                 };
@@ -280,11 +282,7 @@ impl<'a> Agent<'a> {
                     Ok(value) => value,
                     Err(error) => {
                         let error = AgentError::Presenter(error.to_string());
-                        config.state = schomburg_store::ReconciliationState::Failed;
-                        config.last_error = Some(error.to_string());
-                        self.store
-                            .save_reconciliation_configuration(&config)
-                            .map_err(AgentError::Store)?;
+                        self.fail_run(&kind, error.to_string())?;
                         return Err(error);
                     }
                 };
@@ -294,18 +292,105 @@ impl<'a> Agent<'a> {
                 result.files_unchanged += generated.files_unchanged;
             }
         }
-        config.last_success = Some(SystemTime::now());
-        config.state = schomburg_store::ReconciliationState::Succeeded;
-        config.counts = schomburg_store::ReconciliationCounts {
+        self.succeed_run(&kind, &result)?;
+        Ok(result)
+    }
+    fn begin_run(&self, kind: &UpdateRecordRunKind) -> Result<(), AgentError> {
+        match kind {
+            UpdateRecordRunKind::ManualUpdate => {
+                let mut s = self
+                    .store
+                    .manual_update_status()
+                    .map_err(AgentError::Store)?;
+                s.last_attempt = Some(SystemTime::now());
+                s.last_error = None;
+                s.state = ReconciliationState::Running;
+                self.store
+                    .save_manual_update_status(&s)
+                    .map_err(AgentError::Store)
+            }
+            UpdateRecordRunKind::ScheduledDailyReconciliation { .. } => {
+                let mut s = self
+                    .store
+                    .scheduled_reconciliation_status()
+                    .map_err(AgentError::Store)?;
+                s.last_attempt = Some(SystemTime::now());
+                s.last_error = None;
+                s.state = ReconciliationState::Running;
+                self.store
+                    .save_scheduled_reconciliation_status(&s)
+                    .map_err(AgentError::Store)
+            }
+        }
+    }
+    fn fail_run(&self, kind: &UpdateRecordRunKind, error: String) -> Result<(), AgentError> {
+        match kind {
+            UpdateRecordRunKind::ManualUpdate => {
+                let mut s = self
+                    .store
+                    .manual_update_status()
+                    .map_err(AgentError::Store)?;
+                s.last_error = Some(error);
+                s.state = ReconciliationState::Failed;
+                self.store
+                    .save_manual_update_status(&s)
+                    .map_err(AgentError::Store)
+            }
+            UpdateRecordRunKind::ScheduledDailyReconciliation { .. } => {
+                let mut s = self
+                    .store
+                    .scheduled_reconciliation_status()
+                    .map_err(AgentError::Store)?;
+                s.last_error = Some(error);
+                s.state = ReconciliationState::Failed;
+                self.store
+                    .save_scheduled_reconciliation_status(&s)
+                    .map_err(AgentError::Store)
+            }
+        }
+    }
+    fn succeed_run(
+        &self,
+        kind: &UpdateRecordRunKind,
+        result: &UpdateRecordResult,
+    ) -> Result<(), AgentError> {
+        let counts = ReconciliationCounts {
             imported: result.imported as u64,
             duplicates: 0,
             rejected: 0,
             failed: result.failed as u64,
         };
-        self.store
-            .save_reconciliation_configuration(&config)
-            .map_err(AgentError::Store)?;
-        Ok(result)
+        match kind {
+            UpdateRecordRunKind::ManualUpdate => {
+                let mut s = self
+                    .store
+                    .manual_update_status()
+                    .map_err(AgentError::Store)?;
+                s.last_success = Some(SystemTime::now());
+                s.last_error = None;
+                s.counts = counts;
+                s.state = ReconciliationState::Succeeded;
+                self.store
+                    .save_manual_update_status(&s)
+                    .map_err(AgentError::Store)
+            }
+            UpdateRecordRunKind::ScheduledDailyReconciliation {
+                eligible_local_date,
+            } => {
+                let mut s = self
+                    .store
+                    .scheduled_reconciliation_status()
+                    .map_err(AgentError::Store)?;
+                s.last_success = Some(SystemTime::now());
+                s.last_error = None;
+                s.counts = counts;
+                s.state = ReconciliationState::Succeeded;
+                s.last_reconciled_local_date = Some(eligible_local_date.clone());
+                self.store
+                    .save_scheduled_reconciliation_status(&s)
+                    .map_err(AgentError::Store)
+            }
+        }
     }
 }
 fn to_source(c: DiscoveredSourceCandidate, now: SystemTime) -> DiscoveredSource {

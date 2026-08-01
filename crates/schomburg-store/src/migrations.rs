@@ -58,6 +58,11 @@ const MIGRATIONS: &[(i64, &str)] = &[(
  imported INTEGER NOT NULL, duplicates INTEGER NOT NULL, rejected INTEGER NOT NULL, failed INTEGER NOT NULL, state TEXT NOT NULL
  );
  INSERT INTO reconciliation_configuration VALUES (1,'paused',NULL,'daily',0,9,0,NULL,NULL,NULL,NULL,0,0,0,0,'paused');
+"), (4, "
+ CREATE TABLE manual_update_status (id INTEGER PRIMARY KEY CHECK (id = 1),last_attempt BLOB,last_success BLOB,last_error TEXT,imported INTEGER NOT NULL,duplicates INTEGER NOT NULL,rejected INTEGER NOT NULL,failed INTEGER NOT NULL,state TEXT NOT NULL);
+ INSERT INTO manual_update_status SELECT 1,last_attempt,last_success,last_error,imported,duplicates,rejected,failed,state FROM reconciliation_configuration WHERE id=1;
+ CREATE TABLE scheduled_reconciliation_status (id INTEGER PRIMARY KEY CHECK (id = 1),last_attempt BLOB,last_success BLOB,last_error TEXT,imported INTEGER NOT NULL,duplicates INTEGER NOT NULL,rejected INTEGER NOT NULL,failed INTEGER NOT NULL,state TEXT NOT NULL,last_reconciled_local_date TEXT,next_scheduled_run BLOB);
+ INSERT INTO scheduled_reconciliation_status VALUES (1,NULL,NULL,NULL,0,0,0,0,'idle',NULL,NULL);
 ")];
 
 pub(crate) fn apply(connection: &mut Connection) -> Result<(), StoreError> {
