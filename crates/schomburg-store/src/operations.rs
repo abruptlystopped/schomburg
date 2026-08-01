@@ -37,6 +37,50 @@ pub enum MonitoringPolicy {
     Always,
     Paused,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GlobalMonitoringState {
+    Enabled,
+    Paused,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReconciliationState {
+    Idle,
+    Running,
+    Succeeded,
+    Failed,
+    Paused,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReconciliationSchedule {
+    Daily,
+    Weekdays,
+    Selected(u8),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalReconciliationTime {
+    pub hour: u8,
+    pub minute: u8,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ReconciliationCounts {
+    pub imported: u64,
+    pub duplicates: u64,
+    pub rejected: u64,
+    pub failed: u64,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReconciliationConfiguration {
+    pub monitoring: GlobalMonitoringState,
+    pub record_folder: Option<String>,
+    pub schedule: ReconciliationSchedule,
+    pub time: LocalReconciliationTime,
+    pub last_attempt: Option<SystemTime>,
+    pub last_success: Option<SystemTime>,
+    pub next_run: Option<SystemTime>,
+    pub last_error: Option<String>,
+    pub counts: ReconciliationCounts,
+    pub state: ReconciliationState,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscoveredSource {

@@ -1,0 +1,3 @@
+# ADR 0011: Persistent reconciliation configuration and schedule semantics
+
+Reconciliation configuration is a singleton operational SQLite record, separate from Events and Annotations. It persists global monitoring state, Record Folder path, schedule/time, next eligible run, and factual last-status fields. Schedule calculation is portable Rust using the machine local timezone and supports Daily, Weekdays, and selected weekdays. Enabled means eligible for a future run, not continuous surveillance. Native shells will edit this configuration; execution and scheduler lifecycle are deferred to 2.3B and 2.3C.

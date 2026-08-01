@@ -1,6 +1,6 @@
 //! Minimal local command-line proof for Schomburg evidence import and display.
 
-use schomburg_agent::Agent;
+use schomburg_agent::{Agent, next_eligible_run, parse_local_time, parse_schedule};
 use schomburg_connector::{
     CompactPresentation, Connector, DetailedPresentation, PresentationError, PresentationField,
     PresentationRegistry,
@@ -43,8 +43,104 @@ pub fn execute(arguments: &[String]) -> Result<String, CliError> {
         ),
         Some("collect") => collect_command(&arguments[1..]),
         Some("record") => record_command(&arguments[1..]),
+        Some("record-folder") => record_folder_command(&arguments[1..]),
+        Some("schedule") => schedule_command(&arguments[1..]),
+        Some("monitoring") => monitoring_command(&arguments[1..]),
+        Some("reconcile") => reconcile_status_command(&arguments[1..]),
         _ => Err(CliError::Usage(usage().to_owned())),
     }
+}
+fn record_folder_command(arguments: &[String]) -> Result<String, CliError> {
+    if arguments.first().map(String::as_str) != Some("set") {
+        return Err(CliError::Usage(usage().to_owned()));
+    }
+    let o = parse_options(&arguments[1..], &["folder", "db"])?;
+    let s = Store::open(required_option(&o, "db")?).map_err(CliError::Store)?;
+    let mut c = s.reconciliation_configuration().map_err(CliError::Store)?;
+    c.record_folder = Some(required_option(&o, "folder")?.to_owned());
+    s.save_reconciliation_configuration(&c)
+        .map_err(CliError::Store)?;
+    Ok(format!(
+        "record folder: {}\n",
+        c.record_folder.expect("set")
+    ))
+}
+fn schedule_command(arguments: &[String]) -> Result<String, CliError> {
+    match arguments.first().map(String::as_str) {
+        Some("set") => {
+            let o = parse_options(&arguments[1..], &["time", "days", "db"])?;
+            let s = Store::open(required_option(&o, "db")?).map_err(CliError::Store)?;
+            let mut c = s.reconciliation_configuration().map_err(CliError::Store)?;
+            c.time = parse_local_time(required_option(&o, "time")?).map_err(CliError::Agent)?;
+            c.schedule = parse_schedule(required_option(&o, "days")?).map_err(CliError::Agent)?;
+            c.next_run = next_eligible_run(&c, SystemTime::now()).map_err(CliError::Agent)?;
+            s.save_reconciliation_configuration(&c)
+                .map_err(CliError::Store)?;
+            Ok("schedule saved\n".to_owned())
+        }
+        Some("show") => show_config(&arguments[1..]),
+        _ => Err(CliError::Usage(usage().to_owned())),
+    }
+}
+fn monitoring_command(arguments: &[String]) -> Result<String, CliError> {
+    let enabled = match arguments.first().map(String::as_str) {
+        Some("on") => true,
+        Some("off") => false,
+        _ => return Err(CliError::Usage(usage().to_owned())),
+    };
+    let o = parse_options(&arguments[1..], &["db"])?;
+    let s = Store::open(required_option(&o, "db")?).map_err(CliError::Store)?;
+    let mut c = s.reconciliation_configuration().map_err(CliError::Store)?;
+    c.monitoring = if enabled {
+        schomburg_store::GlobalMonitoringState::Enabled
+    } else {
+        schomburg_store::GlobalMonitoringState::Paused
+    };
+    c.next_run = next_eligible_run(&c, SystemTime::now()).map_err(CliError::Agent)?;
+    s.save_reconciliation_configuration(&c)
+        .map_err(CliError::Store)?;
+    Ok(format!(
+        "monitoring: {}\n",
+        if enabled { "enabled" } else { "paused" }
+    ))
+}
+fn reconcile_status_command(arguments: &[String]) -> Result<String, CliError> {
+    if arguments.first().map(String::as_str) != Some("status") {
+        return Err(CliError::Usage(usage().to_owned()));
+    }
+    show_config(&arguments[1..])
+}
+fn show_config(arguments: &[String]) -> Result<String, CliError> {
+    let o = parse_options(arguments, &["db"])?;
+    let s = Store::open(required_option(&o, "db")?).map_err(CliError::Store)?;
+    let c = s.reconciliation_configuration().map_err(CliError::Store)?;
+    Ok(format!(
+        "monitoring: {:?}\nstate: {:?}\nrecord folder: {}\nschedule: {:?}\ntime: {:02}:{:02}\nnext run: {}\nlast attempt: {}\nlast success: {}\nlast error: {}\ncounts: imported={} duplicates={} rejected={} failed={}\n",
+        c.monitoring,
+        c.state,
+        c.record_folder
+            .unwrap_or_else(|| "not configured".to_owned()),
+        c.schedule,
+        c.time.hour,
+        c.time.minute,
+        c.next_run
+            .map(format_local_time)
+            .transpose()?
+            .unwrap_or_else(|| "none".to_owned()),
+        c.last_attempt
+            .map(format_local_time)
+            .transpose()?
+            .unwrap_or_else(|| "never".to_owned()),
+        c.last_success
+            .map(format_local_time)
+            .transpose()?
+            .unwrap_or_else(|| "never".to_owned()),
+        c.last_error.unwrap_or_else(|| "none".to_owned()),
+        c.counts.imported,
+        c.counts.duplicates,
+        c.counts.rejected,
+        c.counts.failed
+    ))
 }
 
 fn record_command(arguments: &[String]) -> Result<String, CliError> {

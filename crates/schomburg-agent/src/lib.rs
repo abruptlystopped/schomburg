@@ -5,7 +5,97 @@ use schomburg_engine::Engine;
 use schomburg_store::{
     ConnectionId, ConnectionStatus, DiscoveredSource, DiscoveredSourceId, Store, StoreError,
 };
+use schomburg_store::{
+    GlobalMonitoringState, LocalReconciliationTime, ReconciliationConfiguration,
+    ReconciliationSchedule,
+};
 use std::{collections::BTreeMap, fmt, path::PathBuf, time::SystemTime};
+use time::{OffsetDateTime, UtcOffset, Weekday};
+
+/// Calculates the next local eligible schedule occurrence after `now`.
+pub fn next_eligible_run(
+    configuration: &ReconciliationConfiguration,
+    now: SystemTime,
+) -> Result<Option<SystemTime>, AgentError> {
+    if configuration.monitoring == GlobalMonitoringState::Paused {
+        return Ok(None);
+    };
+    if configuration.time.hour > 23 || configuration.time.minute > 59 {
+        return Err(AgentError::InvalidLocalTime);
+    };
+    let utc = OffsetDateTime::from(now);
+    let offset =
+        UtcOffset::local_offset_at(utc).map_err(|e| AgentError::Schedule(e.to_string()))?;
+    let local = utc.to_offset(offset);
+    for days in 0..8 {
+        let candidate_date = local
+            .date()
+            .checked_add(time::Duration::days(days))
+            .ok_or_else(|| AgentError::Schedule("date overflow".to_owned()))?;
+        if !eligible(configuration.schedule, candidate_date.weekday()) {
+            continue;
+        }
+        let candidate = candidate_date
+            .with_hms(configuration.time.hour, configuration.time.minute, 0)
+            .map_err(|e| AgentError::Schedule(e.to_string()))?
+            .assume_offset(offset);
+        if days > 0 || candidate >= local {
+            return Ok(Some(SystemTime::from(candidate)));
+        }
+    }
+    Ok(None)
+}
+fn eligible(schedule: ReconciliationSchedule, day: Weekday) -> bool {
+    match schedule {
+        ReconciliationSchedule::Daily => true,
+        ReconciliationSchedule::Weekdays => !matches!(day, Weekday::Saturday | Weekday::Sunday),
+        ReconciliationSchedule::Selected(mask) => {
+            mask & (1 << (day.number_days_from_monday())) != 0
+        }
+    }
+}
+pub fn parse_local_time(value: &str) -> Result<LocalReconciliationTime, AgentError> {
+    let Some((h, m)) = value.split_once(':') else {
+        return Err(AgentError::InvalidLocalTime);
+    };
+    let Ok(hour) = h.parse() else {
+        return Err(AgentError::InvalidLocalTime);
+    };
+    let Ok(minute) = m.parse() else {
+        return Err(AgentError::InvalidLocalTime);
+    };
+    if hour > 23 || minute > 59 {
+        return Err(AgentError::InvalidLocalTime);
+    };
+    Ok(LocalReconciliationTime { hour, minute })
+}
+pub fn parse_schedule(value: &str) -> Result<ReconciliationSchedule, AgentError> {
+    match value {
+        "daily" => Ok(ReconciliationSchedule::Daily),
+        "weekdays" => Ok(ReconciliationSchedule::Weekdays),
+        other => {
+            let mut mask = 0;
+            for token in other.split(',') {
+                let bit = match token {
+                    "mon" => 0,
+                    "tue" => 1,
+                    "wed" => 2,
+                    "thu" => 3,
+                    "fri" => 4,
+                    "sat" => 5,
+                    "sun" => 6,
+                    _ => return Err(AgentError::InvalidWeekdays),
+                };
+                mask |= 1 << bit;
+            }
+            if mask == 0 {
+                Err(AgentError::InvalidWeekdays)
+            } else {
+                Ok(ReconciliationSchedule::Selected(mask))
+            }
+        }
+    }
+}
 
 /// Machine-level coordinator. It owns no source parsing; extensions do.
 pub struct Agent<'a> {
@@ -150,12 +240,18 @@ pub struct CollectionCycleReport {
 pub enum AgentError {
     Store(StoreError),
     Extension(schomburg_connector::ExtensionError),
+    InvalidLocalTime,
+    InvalidWeekdays,
+    Schedule(String),
 }
 impl fmt::Display for AgentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Store(e) => write!(f, "agent storage error: {e}"),
             Self::Extension(e) => write!(f, "agent connector error: {e}"),
+            Self::InvalidLocalTime => write!(f, "invalid local reconciliation time"),
+            Self::InvalidWeekdays => write!(f, "invalid selected weekdays"),
+            Self::Schedule(e) => write!(f, "schedule error: {e}"),
         }
     }
 }
@@ -171,6 +267,7 @@ mod tests {
         fs,
         path::Path,
         sync::atomic::{AtomicUsize, Ordering},
+        time::UNIX_EPOCH,
     };
 
     static SERIAL: AtomicUsize = AtomicUsize::new(0);
@@ -221,6 +318,61 @@ mod tests {
             store,
             [Box::new(GitConnectorExtension) as Box<dyn ConnectorExtension>],
         )
+    }
+
+    fn configuration(
+        schedule: ReconciliationSchedule,
+        hour: u8,
+        minute: u8,
+    ) -> ReconciliationConfiguration {
+        ReconciliationConfiguration {
+            monitoring: GlobalMonitoringState::Enabled,
+            record_folder: None,
+            schedule,
+            time: LocalReconciliationTime { hour, minute },
+            last_attempt: None,
+            last_success: None,
+            next_run: None,
+            last_error: None,
+            counts: schomburg_store::ReconciliationCounts::default(),
+            state: schomburg_store::ReconciliationState::Idle,
+        }
+    }
+
+    #[test]
+    fn schedule_parsing_and_paused_behavior_are_explicit() {
+        assert!(parse_local_time("24:00").is_err());
+        assert!(parse_schedule("mon,bad").is_err());
+        assert!(parse_schedule("").is_err());
+        let mut paused = configuration(ReconciliationSchedule::Daily, 9, 0);
+        paused.monitoring = GlobalMonitoringState::Paused;
+        assert_eq!(
+            next_eligible_run(&paused, UNIX_EPOCH).expect("paused"),
+            None
+        );
+    }
+
+    #[test]
+    fn configuration_persists_without_affecting_evidence() {
+        let temp = Temp::new();
+        let db = temp.path.join("config.sqlite3");
+        let store = Store::open(&db).expect("store");
+        let mut config = store.reconciliation_configuration().expect("default");
+        assert_eq!(config.monitoring, GlobalMonitoringState::Paused);
+        config.monitoring = GlobalMonitoringState::Enabled;
+        config.record_folder = Some("/tmp/records".to_owned());
+        config.schedule = parse_schedule("mon,wed").expect("days");
+        config.time = parse_local_time("09:30").expect("time");
+        config.last_error = Some("failure".to_owned());
+        config.counts.imported = 2;
+        store
+            .save_reconciliation_configuration(&config)
+            .expect("save");
+        drop(store);
+        let reopened = Store::open(&db).expect("reopen");
+        let loaded = reopened.reconciliation_configuration().expect("load");
+        assert_eq!(loaded, config);
+        assert!(reopened.list_events().expect("events").is_empty());
     }
 
     #[test]

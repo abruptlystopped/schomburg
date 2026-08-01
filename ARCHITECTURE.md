@@ -126,6 +126,12 @@ source-agnostic; connectors define what can be discovered. Contexts remain
 separate. Pause and disconnect affect future collection only and never delete
 preserved evidence. CLI consent is temporary pending native settings.
 
+Reconciliation configuration is separate mutable operational state: monitoring
+enabled/paused, Record Folder, schedule, local time, next eligible run, and
+last status fields. It is not evidence and is never stored in Events. Phase
+2.3A calculates eligibility only; `reconcile_once` and a scheduler lifecycle
+remain deferred.
+
 Connectors also own factual presentation of the events they produce. The shared
 contract returns structured compact and detailed presentation data, rather than
 preformatted terminal text. A host routes a stored event to a presenter by its

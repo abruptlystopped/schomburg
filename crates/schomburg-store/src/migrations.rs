@@ -50,6 +50,14 @@ const MIGRATIONS: &[(i64, &str)] = &[(
       configuration TEXT NOT NULL, last_attempt BLOB, last_success BLOB, last_error TEXT
     );
     CREATE INDEX idx_connections_status ON connections(status, policy);
+"), (3, "
+ CREATE TABLE reconciliation_configuration (
+ id INTEGER PRIMARY KEY CHECK (id = 1), monitoring TEXT NOT NULL, record_folder TEXT,
+ schedule_kind TEXT NOT NULL, schedule_days INTEGER NOT NULL, local_hour INTEGER NOT NULL, local_minute INTEGER NOT NULL,
+ last_attempt BLOB, last_success BLOB, next_run BLOB, last_error TEXT,
+ imported INTEGER NOT NULL, duplicates INTEGER NOT NULL, rejected INTEGER NOT NULL, failed INTEGER NOT NULL, state TEXT NOT NULL
+ );
+ INSERT INTO reconciliation_configuration VALUES (1,'paused',NULL,'daily',0,9,0,NULL,NULL,NULL,NULL,0,0,0,0,'paused');
 ")];
 
 pub(crate) fn apply(connection: &mut Connection) -> Result<(), StoreError> {

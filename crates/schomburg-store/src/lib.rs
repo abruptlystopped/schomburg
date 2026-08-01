@@ -393,6 +393,23 @@ impl Store {
             Ok(())
         }
     }
+
+    /// Reads the singleton reconciliation operational configuration.
+    pub fn reconciliation_configuration(&self) -> Result<ReconciliationConfiguration, StoreError> {
+        self.connection.query_row("SELECT monitoring,record_folder,schedule_kind,schedule_days,local_hour,local_minute,last_attempt,last_success,next_run,last_error,imported,duplicates,rejected,failed,state FROM reconciliation_configuration WHERE id=1",[],|r| Ok((r.get::<_,String>(0)?,r.get(1)?,r.get::<_,String>(2)?,r.get::<_,u8>(3)?,r.get::<_,u8>(4)?,r.get::<_,u8>(5)?,r.get::<_,Option<Vec<u8>>>(6)?,r.get::<_,Option<Vec<u8>>>(7)?,r.get::<_,Option<Vec<u8>>>(8)?,r.get(9)?,r.get::<_,i64>(10)? as u64,r.get::<_,i64>(11)? as u64,r.get::<_,i64>(12)? as u64,r.get::<_,i64>(13)? as u64,r.get::<_,String>(14)?))).map_err(StoreError::database).and_then(|v| {let(monitoring,record_folder,kind,days,hour,minute,a,s,n,error,i,d,r,f,state)=v;Ok(ReconciliationConfiguration{monitoring:if monitoring=="enabled"{GlobalMonitoringState::Enabled}else{GlobalMonitoringState::Paused},record_folder,schedule:match kind.as_str(){"daily"=>ReconciliationSchedule::Daily,"weekdays"=>ReconciliationSchedule::Weekdays,"selected"=>ReconciliationSchedule::Selected(days),_=>return Err(StoreError::UnsupportedStoredData{field:"schedule",value:kind})},time:LocalReconciliationTime{hour,minute},last_attempt:a.map(|x|decode_timestamp(&x,"last attempt")).transpose()?,last_success:s.map(|x|decode_timestamp(&x,"last success")).transpose()?,next_run:n.map(|x|decode_timestamp(&x,"next run")).transpose()?,last_error:error,counts:ReconciliationCounts{imported:i,duplicates:d,rejected:r,failed:f},state:match state.as_str(){"idle"=>ReconciliationState::Idle,"running"=>ReconciliationState::Running,"succeeded"=>ReconciliationState::Succeeded,"failed"=>ReconciliationState::Failed,_=>ReconciliationState::Paused}})})
+    }
+    pub fn save_reconciliation_configuration(
+        &self,
+        value: &ReconciliationConfiguration,
+    ) -> Result<(), StoreError> {
+        let (kind, days) = match value.schedule {
+            ReconciliationSchedule::Daily => ("daily", 0),
+            ReconciliationSchedule::Weekdays => ("weekdays", 0),
+            ReconciliationSchedule::Selected(d) => ("selected", d),
+        };
+        self.connection.execute("UPDATE reconciliation_configuration SET monitoring=?1,record_folder=?2,schedule_kind=?3,schedule_days=?4,local_hour=?5,local_minute=?6,last_attempt=?7,last_success=?8,next_run=?9,last_error=?10,imported=?11,duplicates=?12,rejected=?13,failed=?14,state=?15 WHERE id=1",params![if value.monitoring==GlobalMonitoringState::Enabled{"enabled"}else{"paused"},value.record_folder,kind,days,value.time.hour,value.time.minute,value.last_attempt.map(encode_timestamp),value.last_success.map(encode_timestamp),value.next_run.map(encode_timestamp),value.last_error,value.counts.imported as i64,value.counts.duplicates as i64,value.counts.rejected as i64,value.counts.failed as i64,match value.state{ReconciliationState::Idle=>"idle",ReconciliationState::Running=>"running",ReconciliationState::Succeeded=>"succeeded",ReconciliationState::Failed=>"failed",ReconciliationState::Paused=>"paused"}]).map_err(StoreError::database)?;
+        Ok(())
+    }
 }
 
 struct StoredEvent {

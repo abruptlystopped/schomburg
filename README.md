@@ -16,3 +16,5 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 The next proposed tag is `v0.1.0-alpha.1`; it has not been created.
+
+Phase 2.3A adds persisted reconciliation configuration and portable scheduling math. It does not yet run reconciliation automatically or start a scheduler process.

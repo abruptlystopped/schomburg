@@ -28,6 +28,21 @@ This is a planning scaffold, not a commitment or schedule.
 - [ ] Provide a native or desktop presentation surface with readable daily timeline, date navigation, source/repository grouping, and compact/detailed views.
 - [ ] Provide connection settings, consent UI, global monitoring control, pause controls, and monitoring schedules.
 
+### Phase 2.3A — Persistent reconciliation configuration and scheduling math — Complete
+
+- [x] Persist monitoring, Record Folder, schedule/time, next eligible run, and status fields.
+- [x] Support Daily, Weekdays, and selected-weekday policies.
+
+### Phase 2.3B — Reconcile once
+
+- [ ] Implement reusable collection and affected-date record generation.
+
+### Phase 2.3C — Scheduler lifecycle
+
+- [ ] Implement portable long-running lifecycle, cancellation, retry, and concurrency policy.
+
+Native macOS menu-bar and Windows tray shells remain later work.
+
 ## Open planning questions
 
 - What presentation workflow best serves ordinary users?

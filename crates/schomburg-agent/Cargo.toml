@@ -8,6 +8,7 @@ publish = false
 schomburg-connector = { path = "../schomburg-connector" }
 schomburg-engine = { path = "../schomburg-engine" }
 schomburg-store = { path = "../schomburg-store" }
+time = { version = "0.3.53", default-features = false, features = ["local-offset"] }
 
 [dev-dependencies]
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
