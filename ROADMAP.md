@@ -4,7 +4,7 @@
 
 This is a planning scaffold, not a commitment or schedule.
 
-## Phase 1 — Architecture and developer experience
+## Phase 1 Alpha — Complete
 
 - [x] Define the engine boundary: collect, preserve, and present evidence only.
 - [x] Define the initial workspace members and their dependency direction.
@@ -22,19 +22,14 @@ This is a planning scaffold, not a commitment or schedule.
 - [x] Record the foundation decisions as an ADR.
 - [ ] Select an MSRV policy before the first public package release.
 
-## Next phase — Implementation planning
+## Phase 2 — Presentation
 
-- [ ] Define the first evidence-collection workflow without expanding the
-  engine's responsibility.
-- [ ] Define preservation and presentation requirements for that workflow.
-- [ ] Define how presentation selects the latest valid organizational
-  assignment while retaining history.
-- [ ] Define a numeric confidence scale and validation policy before adding
-  confidence to annotations.
-- [ ] Establish acceptance criteria before implementing it.
+- [ ] Make preserved evidence usable for ordinary people without terminal commands.
+- [ ] Provide a native or desktop presentation surface with readable daily timeline, date navigation, source/repository grouping, and compact/detailed views.
+- [ ] Provide connection settings, consent UI, global monitoring control, pause controls, and monitoring schedules.
 
 ## Open planning questions
 
-- What is the first evidence source Schomburg should support?
-- What retention, export, and presentation requirements apply to that source?
+- What presentation workflow best serves ordinary users?
+- What retention and export requirements apply?
 - Which Rust version will become the public MSRV policy?

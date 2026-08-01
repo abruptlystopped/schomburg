@@ -414,7 +414,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn usage() -> &'static str {
-    "usage:\n  schomburg init --db <database-path>\n  schomburg import git --repo <repository-path> --db <database-path>\n  schomburg events --db <database-path> [--raw]\n  schomburg event <event-id> --db <database-path> [--raw]\n"
+    "usage:\n  schomburg init --db <database-path>\n  schomburg discover --root <path> --db <database-path>\n  schomburg sources --db <database-path>\n  schomburg connect|decline <source-id> --db <database-path>\n  schomburg connections --db <database-path>\n  schomburg pause|resume|disconnect <connection-id> --db <database-path>\n  schomburg collect --db <database-path>\n  schomburg events --db <database-path> [--raw]\n  schomburg event <event-id> --db <database-path> [--raw]\n  schomburg import git --repo <repository-path> --db <database-path>\n"
 }
 
 /// Errors returned by the local proof CLI.
