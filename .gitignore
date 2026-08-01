@@ -8,3 +8,15 @@
 
 # Explicit local Schomburg proof databases
 /.schomburg/
+
+# macOS / SwiftPM generated output
+apps/schomburg-macos/.build/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+
+# Local macOS packaging artifacts
+/dist/
+*.dmg
+*.pkg
+*.log

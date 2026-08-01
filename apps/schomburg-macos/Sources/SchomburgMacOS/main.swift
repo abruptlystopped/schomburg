@@ -68,12 +68,24 @@ enum MenuBarVisualState: Equatable {
 @MainActor final class AppModel: ObservableObject {
     @Published var status: [String: JSONValue] = [:]; @Published var error: String?; @Published var updating = false; @Published var showingSettings = false
     private var host: HostClient?
-    func start() { do { let env = ProcessInfo.processInfo.environment; let hostPath = URL(fileURLWithPath: env["SCHOMBURG_HOST_PATH"] ?? FileManager.default.currentDirectoryPath + "/target/debug/schomburg-host"); let db = URL(fileURLWithPath: env["SCHOMBURG_DB_PATH"] ?? NSHomeDirectory() + "/.schomburg/machine.sqlite3"); host = try HostClient(hostPath: hostPath, databasePath: db); refresh() } catch { self.error = error.localizedDescription } }
+    func start() { do { let paths = AppPaths.resolve(); try FileManager.default.createDirectory(at: paths.database.deletingLastPathComponent(), withIntermediateDirectories: true); host = try HostClient(hostPath: paths.host, databasePath: paths.database); refresh() } catch { self.error = error.localizedDescription } }
     func refresh() { do { guard let response = try host?.send("status"), let value = response.result?.object else { return }; status = value; error = nil } catch { self.error = error.localizedDescription } }
     func updateRecord() { updating = true; defer { updating = false }; do { _ = try host?.send("update_record"); refresh() } catch { self.error = error.localizedDescription } }
     func monitoring(_ enabled: Bool) { do { _ = try host?.send("set_monitoring", params: ["enabled": .bool(enabled)]); refresh() } catch { self.error = error.localizedDescription } }
     func openToday() { guard let path = status["today_record_path"]?.string else { showingSettings = true; return }; if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } else { updateRecord() } }
     func openFolder() { guard let path = status["record_folder"]?.string else { showingSettings = true; return }; NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+}
+
+struct AppPaths {
+    let host: URL; let database: URL
+    static func resolve(environment: [String: String] = ProcessInfo.processInfo.environment) -> AppPaths {
+        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/schomburg-host")
+        let host = environment["SCHOMBURG_HOST_PATH"].map { URL(fileURLWithPath: $0) } ?? bundled
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("Schomburg", isDirectory: true)
+        let database = environment["SCHOMBURG_DB_PATH"].map { URL(fileURLWithPath: $0) } ?? support.appendingPathComponent("schomburg.sqlite3")
+        return AppPaths(host: host, database: database)
+    }
+    static var defaultRecordFolder: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.appendingPathComponent("Schomburg Record", isDirectory: true) }
 }
 
 @main struct SchomburgMacOSApp: App {
